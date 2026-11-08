@@ -29,6 +29,8 @@ type reader struct {
 	off     int
 	max     int
 	outline bool
+	sel     int  // heading picked in Contents
+	pinned  bool // sel was picked by a jump/click (else it follows the scroll)
 
 	cacheW   int
 	cacheSrc string
@@ -182,31 +184,57 @@ func (m *model) closeReader() tea.Cmd {
 
 func (m *model) rdScroll(d int) {
 	rd := m.rd
+	old := rd.off
 	rd.off = max(0, min(rd.max, rd.off+d))
+	if rd.off != old {
+		rd.pinned = false
+	}
+}
+
+// rdSelect picks heading i: scrolls to it, and keeps it highlighted even when the
+// page can't scroll that far (headings near the end of the file)
+func (m *model) rdSelect(i int) {
+	_, heads := m.rdLines(m.rdWidth())
+	if i < 0 || i >= len(heads) {
+		return
+	}
+	rd := m.rd
+	rd.sel, rd.pinned = i, true
+	rd.off = max(0, min(heads[i].line, rd.max))
 }
 
 func (m *model) rdRows() int { return m.h - 3 }
 
 func (m *model) rdJumpHeading(dir int) {
 	_, heads := m.rdLines(m.rdWidth())
-	rd := m.rd
-	if dir > 0 {
-		for _, h := range heads {
-			if h.line > rd.off {
-				rd.off = min(h.line, rd.max)
-				return
-			}
-		}
-		rd.off = rd.max
+	if len(heads) == 0 {
+		m.rdScroll(dir * (m.rdRows() - 2))
 		return
 	}
-	for i := len(heads) - 1; i >= 0; i-- {
-		if heads[i].line < rd.off {
-			rd.off = heads[i].line
-			return
+	cur := m.rdCurHead(heads)
+	switch {
+	case dir > 0 && cur < len(heads)-1:
+		m.rdSelect(cur + 1)
+	case dir < 0 && cur > 0:
+		m.rdSelect(cur - 1)
+	case dir < 0:
+		m.rd.off, m.rd.pinned = 0, false
+	}
+}
+
+// rdCurHead is the heading to highlight: the picked one, or the one you scrolled to
+func (m *model) rdCurHead(heads []mdHeading) int {
+	rd := m.rd
+	if rd.pinned && rd.sel < len(heads) {
+		return rd.sel
+	}
+	cur := -1
+	for i, h := range heads {
+		if h.line <= rd.off+2 {
+			cur = i
 		}
 	}
-	rd.off = 0
+	return cur
 }
 
 func (m *model) rdFind(q string) tea.Cmd {
@@ -268,9 +296,9 @@ func (m *model) rdKey(k tea.KeyPressMsg) tea.Cmd {
 	case "pgup", "b":
 		m.rdScroll(-(page - 2))
 	case "g", "home":
-		rd.off = 0
+		rd.off, rd.pinned = 0, false
 	case "G", "end":
-		rd.off = rd.max
+		rd.off, rd.pinned = rd.max, false
 	case "]", "}":
 		m.rdJumpHeading(1)
 	case "[", "{":
@@ -320,10 +348,7 @@ func (m *model) rdKey(k tea.KeyPressMsg) tea.Cmd {
 func (m *model) rdClick(z *zone) tea.Cmd {
 	switch z.id {
 	case "toc":
-		_, heads := m.rdLines(m.rdWidth())
-		if z.idx < len(heads) {
-			m.rd.off = min(heads[z.idx].line, m.rd.max)
-		}
+		m.rdSelect(z.idx)
 	case "rd-close":
 		return m.closeReader()
 	case "rd-toc":
@@ -389,12 +414,7 @@ func (m *model) rdRender() string {
 	out := []string{left + strings.Repeat(" ", max(gap, 0)) + right, fg(cDim).Render(strings.Repeat("─", m.w))}
 
 	// which heading are we in
-	curHead := -1
-	for i, h := range heads {
-		if h.line <= rd.off+2 {
-			curHead = i
-		}
-	}
+	curHead := m.rdCurHead(heads)
 	var toc []string
 	if tw > 0 {
 		var body []string
@@ -434,6 +454,12 @@ func (m *model) rdRender() string {
 			if rd.find != "" && len(rd.hits) > 0 && j == rd.hits[rd.hit] {
 				text = fg(cYellow).Render("▶") + text
 			}
+		}
+		// a bar next to the picked heading, so you see where you jumped
+		if rd.pinned && curHead >= 0 && rd.off+i == heads[curHead].line && margin >= 2 {
+			l += strings.Repeat(" ", margin-2) + fg(cAcc).Render("▌ ") + pad(text, area-margin)
+			out = append(out, l)
+			continue
 		}
 		l += strings.Repeat(" ", margin) + pad(text, area-margin)
 		out = append(out, l)
