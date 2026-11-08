@@ -22,12 +22,13 @@ type tabInfo struct {
 }
 
 var tabs = []tabInfo{
-	{"Home", icHome, 7}, {"Repos", icRepo, 0}, {"Issues", icIssue, 5}, {"PRs", icPR, 6},
+	{"Home", icHome, 7}, {"Repos", icRepo, 0}, {"Issues", icIssue, 0}, {"PRs", icPR, 6},
 	{"Actions", icActions, 0}, {"Inbox", icInbox, 7}, {"Explore", icExplore, 8},
 }
 
 const (
 	tabRepos   = 1
+	tabIssues  = 2
 	tabActions = 4
 )
 
@@ -113,6 +114,11 @@ type model struct {
 	lastClick time.Time
 	lastIdx   int
 
+	// issues (batch 5)
+	iss        issState
+	issueLists map[string]*issueList
+	comments   map[string]*commentList
+
 	// actions + releases (batch 4)
 	act      actState
 	runs     map[string]*runList
@@ -152,7 +158,7 @@ func newModel() *model {
 		blobs: map[string]*blobData{}, clists: map[string]*commitList{}, cdetail: map[string]*commitDetail{},
 		blists: map[string]*branchList{}, lines: map[string][]string{},
 		runs: map[string]*runList{}, jobs: map[string]*jobList{}, releases: map[string]*releaseList{},
-		logs: map[string]map[int64]string{},
+		logs: map[string]map[int64]string{}, issueLists: map[string]*issueList{}, comments: map[string]*commentList{},
 	}
 	m.loadRuns()
 	var c reposCache
@@ -406,6 +412,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.linfo = msg
 	case liveTick:
 		return m, m.onLive()
+	case editedMsg:
+		return m, m.onEdited(msg)
+	case issueDoneMsg:
+		return m, m.onIssueDone(msg)
+	case issReloadMsg:
+		m.issForget("", 0)
+		return m, m.issReload()
+	case repoLabelsMsg:
+		return m, m.onRepoLabels(msg)
 	case reloadMsg:
 		return m, m.onReload(msg.key)
 	case ciDoneMsg:
@@ -442,6 +457,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		msg.apply(m)
 		if m.tab == tabActions && m.rd == nil {
 			return m, m.loadJobs(m.selRun(), true)
+		}
+		if m.tab == tabIssues && m.rd == nil {
+			return m, m.loadComments(m.selIssue(), true)
 		}
 		if m.exActive() != nil {
 			m.exClamp()
@@ -498,6 +516,9 @@ func (m *model) setTab(i int) tea.Cmd {
 	}
 	if i == tabActions {
 		return tea.Batch(m.actLoadAll(), m.actSelected())
+	}
+	if i == tabIssues {
+		return m.issSelected()
 	}
 	return nil
 }
@@ -616,6 +637,27 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	// typing a search in the Issues tab
+	if m.tab == tabIssues && m.iss.filtering {
+		switch s {
+		case "esc":
+			m.iss.filtering, m.iss.query = false, ""
+			return m.issSelected()
+		case "enter":
+			m.iss.filtering = false
+			return nil
+		case "down", "ctrl+n", "ctrl+j":
+			return m.issMove(1)
+		case "up", "ctrl+k":
+			return m.issMove(-1)
+		}
+		if editText(&m.iss.query, k) {
+			m.iss.cur, m.iss.off = 0, 0
+			return m.issSelected()
+		}
+		return nil
+	}
+
 	// typing a search in the Actions tab
 	if m.tab == tabActions && m.act.filtering {
 		switch s {
@@ -682,6 +724,11 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 			return m.exBack()
 		case m.focus == 1:
 			m.focus = 0
+		case m.tab == tabIssues && m.iss.query != "":
+			m.iss.query = ""
+			return m.issSelected()
+		case m.tab == tabIssues:
+			return nil
 		case m.tab == tabActions && m.act.query != "":
 			m.act.query = ""
 			return m.actSelected()
@@ -704,6 +751,9 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.tab == tabActions {
 		return m.actKey(s)
+	}
+	if m.tab == tabIssues {
+		return m.issTabKey(s)
 	}
 	if m.tab != tabRepos {
 		return nil
@@ -845,9 +895,26 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 	case "list":
 		m.focus = 0
 	case "preview":
-		if m.tab == tabRepos || m.tab == tabActions {
+		if m.tab == tabRepos || m.tab == tabActions || m.tab == tabIssues {
 			m.focus = 1
 		}
+	case "issrow":
+		m.focus = 0
+		double := z.idx == m.lastIdx && time.Since(m.lastClick) < 400*time.Millisecond
+		m.lastIdx, m.lastClick = z.idx, time.Now()
+		var cmd tea.Cmd
+		if z.idx != m.iss.cur {
+			m.iss.cur = z.idx
+			cmd = m.issSelected()
+		}
+		if double {
+			m.lastIdx = -1
+			return tea.Batch(cmd, m.issRead())
+		}
+		return cmd
+	case "issscope":
+		m.iss.scope, m.iss.cur, m.iss.off = z.idx, 0, 0
+		return m.issSelected()
 	case "actrow":
 		m.focus = 0
 		double := z.idx == m.lastIdx && time.Since(m.lastClick) < 400*time.Millisecond
@@ -904,9 +971,14 @@ func (m *model) wheel(ms tea.Mouse) tea.Cmd {
 		return m.exMove(d)
 	case "actrow":
 		return m.actMove(d)
+	case "issrow":
+		return m.issMove(d)
 	case "row", "list":
 		if m.tab == tabActions {
 			return m.actMove(d)
+		}
+		if m.tab == tabIssues {
+			return m.issMove(d)
 		}
 		if m.exActive() != nil {
 			return m.exMove(d)
@@ -1001,6 +1073,9 @@ func (m *model) actClone(then string) tea.Cmd {
 }
 
 func (m *model) buttons() []button {
+	if b := m.issButtons(); b != nil {
+		return b
+	}
 	if b := m.ciButtons(); b != nil {
 		return b
 	}
@@ -1029,6 +1104,19 @@ func (m *model) runButton(i int) tea.Cmd {
 		return nil
 	}
 	switch b[i].id {
+	case "issread":
+		return m.issRead()
+	case "isscomment":
+		return m.issComment()
+	case "isstoggle":
+		return m.issToggle()
+	case "isslabels":
+		return m.issLabels()
+	case "issnew":
+		return m.issNew()
+	case "issstate":
+		cmd, _ := m.issueKey("s")
+		return cmd
 	case "logs":
 		return m.actLogs()
 	case "rerun":
@@ -1060,6 +1148,9 @@ func (m *model) runButton(i int) tea.Cmd {
 	case "refresh":
 		if m.tab == tabActions {
 			return m.actRefresh()
+		}
+		if m.tab == tabIssues {
+			return m.issTabKey("r")
 		}
 		if m.exActive() != nil {
 			return m.exRefresh()
@@ -1119,6 +1210,12 @@ func (m *model) commands() []command {
 			return m.refresh()
 		}},
 		command{"Show all keys", "?", func(m *model) tea.Cmd { m.help = true; m.pvOff = 0; return nil }},
+		command{"New issue", "N", func(m *model) tea.Cmd { return m.issNew() }},
+		command{"Comment on the issue", "C", func(m *model) tea.Cmd { return m.issComment() }},
+		command{"Close / reopen the issue", "x", func(m *model) tea.Cmd { return m.issToggle() }},
+		command{"Issue labels", "t", func(m *model) tea.Cmd { return m.issLabels() }},
+		command{"Edit the issue description", "E", func(m *model) tea.Cmd { return m.issEdit() }},
+		command{"Show open / closed issues", "s", func(m *model) tea.Cmd { cmd, _ := m.issueKey("s"); return cmd }},
 		command{"Show failed CI runs", "f", func(m *model) tea.Cmd {
 			m.setTab(tabActions)
 			m.act.filter, m.act.cur, m.act.off = 1, 0, 0
@@ -1171,6 +1268,8 @@ func (m *model) render() string {
 	} else {
 		if m.tab == tabActions {
 			left = m.actListBox(lw, ph, 2)
+		} else if m.tab == tabIssues {
+			left = m.issListBox(lw, ph, 2)
 		} else {
 			left = m.listBox(lw, ph, 2)
 		}
@@ -1225,6 +1324,11 @@ func (m *model) pathBar() string {
 		out = m.exPathBar()
 		if m.help {
 			out += sep + fg(cTxt).Render("Keys")
+		}
+	} else if m.tab == tabIssues {
+		out += sep + fg(cHint).Render(issScopes[m.iss.scope])
+		if is := m.selIssue(); is != nil {
+			out += sep + fg(cTxt).Render(is.repo()) + sep + fg(cTxt).Render(fmt.Sprintf("#%d", is.Number))
 		}
 	} else if m.tab == tabActions {
 		out += sep + fg(cHint).Render(actFilters[m.act.filter])
@@ -1366,6 +1470,8 @@ func (m *model) previewBox(w, h, x0, y0 int) []string {
 		title, lines = "Keys", helpLines(inner)
 	case m.tab == tabActions:
 		title, lines = m.actPreview(inner)
+	case m.tab == tabIssues:
+		title, lines = m.issPreview(inner)
 	case m.tab != tabRepos:
 		t := tabs[m.tab]
 		title = t.name
@@ -1568,12 +1674,20 @@ func (m *model) hintBar(y int) string {
 	}
 	var h [][2]string
 	switch {
+	case m.tab == tabIssues && m.iss.filtering:
+		h = [][2]string{{"type", "to find"}, {"↑↓", "move"}, {"enter", "keep"}, {"esc", "clear"}}
+	case m.tab == tabIssues && m.focus == 1:
+		h = [][2]string{{"j/k", "scroll"}, {"esc", "back"}, {"enter", "read"}, {"C", "comment"}, {"x", "close/reopen"}, {"t", "labels"}, {"?", "keys"}}
+	case m.tab == tabIssues:
+		h = [][2]string{{"j/k", "move"}, {"enter", "read"}, {"C", "comment"}, {"N", "new"}, {"x", "close/reopen"}, {"t", "labels"}, {"s", "open/closed"}, {"f", "scope"}, {"/", "find"}, {"?", "keys"}}
 	case m.tab == tabActions && m.act.filtering:
 		h = [][2]string{{"type", "to find"}, {"↑↓", "move"}, {"enter", "keep"}, {"esc", "clear"}}
 	case m.tab == tabActions:
 		h = [][2]string{{"j/k", "move"}, {"enter", "logs"}, {"R", "re-run"}, {"x", "cancel"}, {"w", "start workflow"}, {"f", "failed/running"}, {"/", "find"}, {"ctrl+p", "commands"}, {"?", "keys"}}
 	case m.tab != tabRepos:
 		h = [][2]string{{"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
+	case m.ex != nil && m.ex.sec == secIssues && m.focus == 0:
+		h = [][2]string{{"j/k", "move"}, {"enter", "read"}, {"C", "comment"}, {"N", "new"}, {"x", "close/reopen"}, {"t", "labels"}, {"s", "open/closed"}, {"esc", "back"}, {"[ ]", "section"}}
 	case m.ex != nil && m.ex.sec == secActions && m.focus == 0:
 		h = [][2]string{{"j/k", "move"}, {"enter", "logs"}, {"R", "re-run"}, {"x", "cancel"}, {"w", "start workflow"}, {"esc", "back"}, {"[ ]", "section"}, {"?", "keys"}}
 	case m.ex != nil && m.ex.sec == secReleases && m.focus == 0:
@@ -1656,6 +1770,16 @@ func helpLines(w int) []string {
 		row("●", "files changed but not committed"),
 		row("↑2", "2 commits not pushed to GitHub"),
 		row("↓3  ↓", "GitHub has 3 (or some) new commits: pull in lazygit"),
+		"",
+		sec("Issues — the Issues tab, or a repo's Issues section"),
+		row("enter  v", "read the whole conversation (each message is a heading)"),
+		row("C", "comment: write it in Nvim, save and quit, confirm"),
+		row("N", "new issue: title, then a description in Nvim (or none)"),
+		row("x", "close / reopen"),
+		row("t", "labels: pick one to add or remove it"),
+		row("E", "edit the description in Nvim"),
+		row("s", "show open / closed"),
+		row("f", "Issues tab: your repos / involved / assigned / created"),
 		"",
 		sec("Actions (CI) — the Actions tab, or a repo's Actions section"),
 		row("enter", "read the logs: jobs and steps are headings, opens at the first error"),

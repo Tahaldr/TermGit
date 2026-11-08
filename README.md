@@ -11,8 +11,8 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | 2 | Repo explorer: code, commits, branches, Nvim, lazygit, local badges | done |
 | 3 | Markdown reader: Nvim-style markdown, full-screen reader, Contents, `termgit file.md` | done |
 | 4 | Actions + Releases: CI runs, logs, re-run, cancel, start workflows, releases | done |
-| 5 | Issues | next |
-| 6 | PRs | |
+| 5 | Issues: read, comment, create, close / reopen, labels, edit in Nvim | done |
+| 6 | PRs | next |
 | 7 | Home + Inbox | |
 | 8 | Explore + repo management | |
 | 9 | Polish: settings, help page, tests | |
@@ -36,6 +36,19 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | `v` | read full screen (README, file, commit) |
 | `esc` | back |
 | `q` | quit |
+
+## Issues
+
+- **Issues tab** (`3`): issues in your repos (and the shared / org repos in your list). `f` switches Your repos / Involved / Assigned / Created, `s` open / closed.
+- Inside a repo: the **Issues** section.
+- `enter` reads the whole conversation full screen (each message is a heading in Contents).
+- `C` comment, `N` new issue, `E` edit the description: written in Nvim (save and quit, then confirm).
+- `x` close / reopen, `t` labels (pick one to add or remove it).
+
+## Back (esc)
+
+`esc` always goes one step back along the path at the top: preview → list, search → cleared,
+a section (Issues, Commits…) → the repo's Code, a folder → its parent, the repo → the repo list.
 
 ## Actions and Releases
 
