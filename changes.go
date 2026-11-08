@@ -88,6 +88,12 @@ func fetchFileDiff(dir string, c change) func() func(*model) {
 			default:
 				fd.newFile = string(data)
 			}
+		} else if c.conflict() {
+			data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(c.path)))
+			if err != nil {
+				fd.err = err.Error()
+			}
+			fd.newFile = string(data)
 		} else {
 			fd.unstaged, _ = gitRun(dir, "diff", "--no-color", "--", c.path)
 			fd.staged, _ = gitRun(dir, "diff", "--no-color", "--cached", "--", c.path)
@@ -472,6 +478,9 @@ func gitDiffLines(diff string, w int) []string {
 
 func (m *model) changePreview(c *change, w int) []string {
 	dir := m.chDir()
+	if c.conflict() {
+		return m.conflictPreview(c, w)
+	}
 	out := []string{fg(cAcc).Bold(true).Render(c.path)}
 	var what []string
 	switch {
@@ -592,6 +601,9 @@ func (m *model) chButtons() []button {
 			b = append(b, button{icCheck + " Stage", "space", "stage"})
 		}
 		b = append(b, button{icClose + " Discard", "d", "discard"})
+	}
+	if st := gitState(m.chDir()); st != "" {
+		b = append(b, button{icCheck + " Continue " + st, "ctrl+p", "gitcontinue"}, button{icClose + " Abort", "ctrl+p", "gitabort"})
 	}
 	b = append(b, button{"Stage all", "a", "stageall"}, button{icCommit + " Commit", "c", "commit"},
 		button{icDown + " Pull", "p", "pull"}, button{icUp + " Push", "P", "push"}, button{icNvim + " Nvim", "e", "nvim"})

@@ -41,6 +41,7 @@ type explorer struct {
 	filtering bool
 	dirCur    map[string]int // where the cursor was in each folder, for going back
 	logRef    string         // local repo: whose commits the Commits section shows ("" = the current branch)
+	plan      *rebasePlan    // an interactive rebase being planned in Commits
 }
 
 type exItem struct {
@@ -56,6 +57,9 @@ type exItem struct {
 	lb      *lbranch
 	lc      *lcommit
 	st      *stashEntry
+	rm      *gitRemote
+	wt      *worktree
+	plan    *planItem
 }
 
 type appDoneMsg struct {
@@ -138,6 +142,13 @@ func (m *model) exItems() []exItem {
 			out = append(out, exItem{kind: k, ent: e})
 		}
 	case secCommits:
+		if dir := m.localPath(&ex.repo); dir != "" && ex.plan != nil {
+			items := m.planItems()
+			for i := range items {
+				out = append(out, exItem{kind: "plan", plan: &items[i]})
+			}
+			return out
+		}
 		if dir := m.localPath(&ex.repo); dir != "" {
 			if ll := m.llogs[dir+"|"+ex.logRef]; ll != nil {
 				for i := range ll.items {
@@ -216,6 +227,16 @@ func (m *model) exItems() []exItem {
 					b := &bl.items[i]
 					if q == "" || fuzzy(strings.ToLower(b.name), q) {
 						out = append(out, exItem{kind: "lbranch", lb: b})
+					}
+				}
+				for i := range bl.remotes {
+					if q == "" || fuzzy(strings.ToLower(bl.remotes[i].name+" "+bl.remotes[i].url), q) {
+						out = append(out, exItem{kind: "remote", rm: &bl.remotes[i]})
+					}
+				}
+				if len(bl.worktrees) > 1 { // only worth showing when there's more than the main folder
+					for i := range bl.worktrees {
+						out = append(out, exItem{kind: "worktree", wt: &bl.worktrees[i]})
 					}
 				}
 			}
@@ -474,6 +495,9 @@ func (m *model) exActivate() tea.Cmd {
 func (m *model) exBack() tea.Cmd {
 	ex := m.ex
 	switch {
+	case ex.plan != nil && ex.sec == secCommits:
+		ex.plan = nil
+		return m.setStatus("Rebase cancelled: nothing changed", false)
 	case m.focus == 1:
 		m.focus = 0
 	case ex.filtering || ex.query[ex.sec] != "":
@@ -519,6 +543,9 @@ func (m *model) exKey(s string) tea.Cmd {
 		}
 	}
 	if ex.sec == secChanges && m.isLocal() {
+		if cmd, ok := m.cfKey(s); ok {
+			return cmd
+		}
 		if cmd, ok := m.chLineKey(s); ok {
 			return cmd
 		}
@@ -530,7 +557,18 @@ func (m *model) exKey(s string) tea.Cmd {
 		}
 	}
 	if ex.sec == secBranches && m.isLocal() && m.focus == 0 {
+		if cmd, ok := m.remoteKey(s); ok {
+			return cmd
+		}
+		if cmd, ok := m.worktreeKey(s); ok {
+			return cmd
+		}
 		if cmd, ok := m.lbKey(s); ok {
+			return cmd
+		}
+	}
+	if ex.sec == secCommits && m.isLocal() && ex.plan != nil {
+		if cmd, ok := m.planKey(s); ok {
 			return cmd
 		}
 	}
@@ -960,6 +998,12 @@ func (m *model) exRow(it exItem, w int, sel bool) string {
 		return m.lbranchRow(it.lb, w, sel)
 	case "lcommit":
 		return m.lcommitRow(it.lc, w, sel)
+	case "plan":
+		return m.planRow(*it.plan, w, sel)
+	case "remote":
+		return m.remoteRow(it.rm, w, sel)
+	case "worktree":
+		return m.worktreeRow(it.wt, w, sel)
 	case "stash":
 		return m.stashRow(it.st, w, sel)
 	case "issue":
@@ -1113,6 +1157,12 @@ func (m *model) exPreview(w int) (string, []string) {
 		return "Branch", m.lbranchPreview(it.lb, w)
 	case "lcommit":
 		return "Commit " + it.lc.short, m.lcommitPreview(it.lc, w)
+	case "plan":
+		return "Rebase plan", m.planPreview(w)
+	case "remote":
+		return "Remote", m.remotePreview(it.rm, w)
+	case "worktree":
+		return "Worktree", m.worktreePreview(it.wt, w)
 	case "stash":
 		return "Stash", m.stashPreview(it.st, w)
 	case "issue":

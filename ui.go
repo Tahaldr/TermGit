@@ -122,6 +122,8 @@ type model struct {
 	shows     map[string]*showData
 	chMap     []diffLine // Changes: where each diff line comes from
 	chCur     int        // Changes: the picked diff line
+	cfLines   []int      // Changes: where each conflict starts in the right panel
+	cfCur     int        // Changes: the picked conflict
 
 	// local git (batch 7)
 	changes   map[string]*changeList
@@ -1304,6 +1306,10 @@ func (m *model) runButton(i int) tea.Cmd {
 		return cmd
 	case "commit":
 		return m.chCommit(false)
+	case "gitcontinue":
+		return m.gitContinue()
+	case "gitabort":
+		return m.gitAbort()
 	case "discard":
 		cmd, _ := m.chKey("d")
 		return cmd
@@ -1917,12 +1923,18 @@ func (m *model) hintBar(y int) string {
 		h = [][2]string{{"j/k", "move"}, {"enter", "logs"}, {"R", "re-run"}, {"x", "cancel"}, {"w", "start workflow"}, {"f", "failed/running"}, {"/", "find"}, {"ctrl+p", "commands"}, {"?", "keys"}}
 	case m.tab != tabRepos:
 		h = [][2]string{{"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
-	case m.ex != nil && m.ex.sec == secChanges && m.focus == 1 && m.chSel() != nil:
+	case m.ex != nil && m.ex.sec == secChanges && m.focus == 1 && m.chSel() != nil && !m.chSel().conflict():
 		h = [][2]string{{"j/k", "pick a line"}, {"space", "stage / unstage line"}, {"a", "whole hunk"}, {"esc", "back"}, {"?", "keys"}}
 	case m.ex != nil && m.ex.sec == secChanges && m.focus == 0 && m.selStash() != nil:
 		h = [][2]string{{"enter", "pop / apply / drop"}, {"d", "drop"}, {"s", "stash"}, {"esc", "back"}, {"[ ]", "section"}}
 	case m.ex != nil && m.ex.sec == secBranches && m.focus == 0 && m.isLocal():
 		h = [][2]string{{"space", "switch"}, {"enter", "commits"}, {"n", "new"}, {"M", "merge"}, {"B", "rebase"}, {"R", "rename"}, {"D", "delete"}, {"P", "push tag"}, {"b", "code"}, {"esc", "back"}}
+	case m.ex != nil && m.ex.sec == secCommits && m.ex.plan != nil:
+		h = [][2]string{{"p", "pick"}, {"s", "squash"}, {"f", "fixup"}, {"r", "reword"}, {"d", "drop"}, {"J/K", "move"}, {"enter", "run"}, {"esc", "cancel"}}
+	case m.ex != nil && m.ex.sec == secChanges && m.chSel() != nil && m.chSel().conflict() && m.focus == 1:
+		h = [][2]string{{"j/k", "next conflict"}, {"o", "keep top"}, {"t", "keep bottom"}, {"b", "keep both"}, {"e", "nvim"}, {"esc", "back"}}
+	case m.ex != nil && m.ex.sec == secChanges && m.chSel() != nil && m.chSel().conflict():
+		h = [][2]string{{"enter", "fix conflicts"}, {"O", "keep all top"}, {"T", "keep all bottom"}, {"e", "nvim"}, {"ctrl+p", "continue / abort"}}
 	case m.ex != nil && m.ex.sec == secCommits && m.focus == 0 && m.isLocal():
 		h = [][2]string{{"enter", "changes"}, {"C", "cherry-pick"}, {"t", "revert"}, {"X", "reset"}, {"T", "tag"}, {"y", "copy id"}, {"space", "check out"}, {"esc", "back"}}
 	case m.ex != nil && m.ex.sec == secChanges && m.focus == 0:
@@ -2047,7 +2059,21 @@ func helpLines(w int) []string {
 		row("T", "tag it"),
 		row("y", "copy its id"),
 		row("space", "check it out (no branch)"),
-		row("ctrl+p", "Abort / Continue when a merge or rebase stops on conflicts"),
+		row("i", "interactive rebase from here: plan pick / squash / fixup / reword / drop / move"),
+		row("S  F", "squash / fixup it into the commit below"),
+		row("R  D", "reword its message / drop it"),
+		"",
+		sec("Conflicts — files marked U in Changes"),
+		row("enter", "go through the conflicts: o keeps the top, t the bottom, b both"),
+		row("O  T", "keep the top / bottom version of the whole file"),
+		row("e", "fix it by hand in Nvim"),
+		row("ctrl+p", "Continue (when all are fixed) or Abort the merge / rebase"),
+		"",
+		sec("Remotes and worktrees — listed at the bottom of Branches"),
+		row("A", "add a remote"),
+		row("f  E  R  D", "on a remote: fetch / change URL / rename / remove"),
+		row("w", "on a branch: open it in its own folder (worktree)"),
+		row("e  L  D", "on a worktree: Nvim / lazygit / remove"),
 		"",
 		sec("PR comments — the Comments view"),
 		row("j / k", "pick a comment (right panel focused: tab or a click)"),

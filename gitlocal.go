@@ -33,8 +33,10 @@ type lbranch struct {
 }
 
 type lbranchList struct {
-	items []lbranch
-	err   string
+	items     []lbranch
+	remotes   []gitRemote
+	worktrees []worktree
+	err       string
 }
 
 type lcommit struct {
@@ -122,6 +124,7 @@ func fetchLBranches(dir string) func() func(*model) {
 			}
 		}
 		bl.items = append(bl.items, tags...)
+		bl.remotes, bl.worktrees = fetchRemotesWorktrees(dir)
 		return func(m *model) { m.lbranches[dir] = bl }
 	}
 }
@@ -425,6 +428,18 @@ func (m *model) lcKey(s string) (tea.Cmd, bool) {
 	sha, short, subj := c.sha, c.short, c.subject
 	cur := m.currentBranch()
 	switch s {
+	case "i":
+		return m.startPlan(c), true
+	case "S":
+		return m.quickRebase(c, "squash"), true
+	case "F":
+		return m.quickRebase(c, "fixup"), true
+	case "D":
+		m.prompt = &prompt{label: "Remove the commit \"" + subj + "\" from history?", confirm: true,
+			done: func(m *model, _ string) tea.Cmd { return m.quickRebase(c, "drop") }}
+		return nil, true
+	case "R":
+		return m.quickRebase(c, "reword"), true
 	case "C":
 		m.prompt = &prompt{label: "Copy \"" + subj + "\" (" + short + ") onto " + cur + "? (cherry-pick)", confirm: true,
 			done: func(m *model, _ string) tea.Cmd {

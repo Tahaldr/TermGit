@@ -15,8 +15,8 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | 6 | Pull requests | done |
 | 7 | Local Git 1: Changes (stage, commit, amend, pull, push, fetch) + PR Comments (reply, resolve, react) | done |
 | 8 | Local Git 2: branches, stash, graph, cherry-pick, revert, reset, tags, line staging | done |
-| 9 | Local Git 3: conflicts, interactive rebase, remotes, worktrees | next |
-| 10 | Home + Inbox | |
+| 9 | Local Git 3: conflicts, interactive rebase, remotes, worktrees | done |
+| 10 | Home + Inbox | next |
 | 11 | Explore + repo management | |
 | 12 | Polish: settings, help page, tests | |
 
@@ -56,7 +56,9 @@ For a repo on this PC, **Branches** and **Commits** show your local Git (GitHub-
 - Branches: `space` switch, `enter` its commits, `n` new, `M` merge into yours, `B` rebase yours onto it, `R` rename, `D` delete, `u` follow a GitHub branch, `P` push a tag, `b` browse its code.
 - Commits (with the graph, `↑` = not pushed): `enter` changes, `C` cherry-pick, `t` revert, `X` reset (soft / mixed / hard), `T` tag, `y` copy id, `space` check out.
 - Changes: `enter` on a file, then `j` / `k` pick a line and `space` stages just that line (`a` the hunk). `s` stashes your changes, `S` chooses what; stashes sit at the bottom (`enter`: pop / apply / drop / branch).
-- When a merge or rebase stops on conflicts: `ctrl+p` → Continue / Abort.
+- Rebase: on a commit in Commits, `i` plans an interactive rebase from there (`p` pick, `s` squash, `f` fixup, `r` reword, `d` drop, `J` / `K` move, `enter` runs it). Quick ones: `S` squash / `F` fixup into the commit below, `R` reword, `D` drop.
+- Conflicts: files marked `U` in Changes. `enter`, then `o` keeps the top, `t` the bottom, `b` both; `O` / `T` for the whole file; `e` fixes it in Nvim. Then Continue (button, or `ctrl+p`) or Abort.
+- Remotes and worktrees are listed at the bottom of Branches: `A` add a remote; on one `f` fetch, `E` URL, `R` rename, `D` remove. `w` on a branch opens it in its own folder (worktree); on a worktree `e` Nvim, `L` lazygit, `D` remove.
 
 ## Pull requests
 
