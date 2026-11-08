@@ -117,10 +117,20 @@ func (m *model) chSel() *change {
 
 // forget what we know about this folder so it's read again
 func (m *model) chForget(dir string) {
-	delete(m.loaded, "changes:"+dir)
+	if dir == "" {
+		return
+	}
+	for _, k := range []string{"changes:", "stash:", "lbranches:"} {
+		delete(m.loaded, k+dir)
+	}
 	for k := range m.loaded {
-		if strings.HasPrefix(k, "gitdiff:"+dir+"|") {
+		if strings.HasPrefix(k, "gitdiff:"+dir+"|") || strings.HasPrefix(k, "llog:"+dir+"|") || strings.HasPrefix(k, "show:"+dir+"|stash@") {
 			delete(m.loaded, k)
+		}
+	}
+	for k := range m.shows {
+		if strings.HasPrefix(k, dir+"|stash@") {
+			delete(m.shows, k) // stash numbers shift when one is added or removed
 		}
 	}
 }
@@ -152,6 +162,17 @@ func (m *model) onGitDone(msg gitDoneMsg) tea.Cmd {
 	out := strings.TrimSpace(msg.out)
 	if msg.err == nil {
 		return tea.Batch(append(cmds, m.setStatus(msg.ok, false))...)
+	}
+	if strings.Contains(out, "CONFLICT") {
+		return tea.Batch(append(cmds, m.setStatus("Conflicts: fix the files marked U in Changes (e opens Nvim), stage them, then ctrl+p → Continue (or Abort)", true))...)
+	}
+	if strings.HasPrefix(msg.what, "branchdel:") && strings.Contains(out, "not fully merged") {
+		name, dir := strings.TrimPrefix(msg.what, "branchdel:"), msg.dir
+		m.prompt = &prompt{label: name + " has commits that aren't merged anywhere. Delete it anyway? They'd be lost.", confirm: true,
+			done: func(m *model, _ string) tea.Cmd {
+				return m.git(dir, "Deleted "+name, "branchdel", "branch", "-D", name)
+			}}
+		return tea.Batch(cmds...)
 	}
 	switch msg.what {
 	case "push":
@@ -490,14 +511,48 @@ func (m *model) changePreview(c *change, w int) []string {
 		}
 		return append(out, lines...)
 	}
-	if strings.TrimSpace(fd.unstaged) != "" {
-		out = append(out, fg(cYellow).Bold(true).Render("Not staged"), "")
-		out = append(out, gitDiffLines(fd.unstaged, w)...)
+	// every diff line remembers where it comes from, so j / k / space can stage single lines
+	m.chMap = make([]diffLine, len(out))
+	side := func(name, title string, st lipgloss.Style, diff string) {
+		if strings.TrimSpace(diff) == "" {
+			return
+		}
+		out = append(out, st.Bold(true).Render(title), "")
+		m.chMap = append(m.chMap, diffLine{}, diffLine{})
+		for h, hk := range parseDiff(diff).hunks {
+			out = append(out, fg(cAcc).Faint(true).Render(hk.header))
+			m.chMap = append(m.chMap, diffLine{name, h, -1})
+			for i, l := range hk.lines {
+				l = strings.ReplaceAll(l, "\t", "    ")
+				ls := fg(cTxt)
+				switch {
+				case strings.HasPrefix(l, "+"):
+					ls = fg(cGreen)
+				case strings.HasPrefix(l, "-"):
+					ls = fg(cRed)
+				case strings.HasPrefix(l, "\\"):
+					ls = fg(cMut)
+				}
+				sel := m.focus == 1 && len(m.chMap) == m.chCur
+				if sel {
+					ls = ls.Background(cDim)
+					l = pad(l, w)
+				}
+				out = append(out, ls.Render(l))
+				mark := diffLine{name, h, i}
+				if !strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "-") {
+					mark.side = "" // context lines can't be staged on their own
+				}
+				m.chMap = append(m.chMap, mark)
+			}
+		}
 		out = append(out, "")
+		m.chMap = append(m.chMap, diffLine{})
 	}
-	if strings.TrimSpace(fd.staged) != "" {
-		out = append(out, fg(cGreen).Bold(true).Render("Staged"), "")
-		out = append(out, gitDiffLines(fd.staged, w)...)
+	side("unstaged", "Not staged", fg(cYellow), fd.unstaged)
+	side("staged", "Staged", fg(cGreen), fd.staged)
+	if m.focus == 1 {
+		out[2] = hints([][2]string{{"j/k", "pick a line"}, {"space", "stage / unstage it"}, {"a", "the whole hunk"}, {"esc", "back"}})
 	}
 	if strings.TrimSpace(fd.unstaged+fd.staged) == "" {
 		out = append(out, fg(cMut).Render("No line changes (mode or rename only)."))
@@ -541,4 +596,14 @@ func (m *model) chButtons() []button {
 	b = append(b, button{"Stage all", "a", "stageall"}, button{icCommit + " Commit", "c", "commit"},
 		button{icDown + " Pull", "p", "pull"}, button{icUp + " Push", "P", "push"}, button{icNvim + " Nvim", "e", "nvim"})
 	return b
+}
+
+// the first line in the diff panel that can be staged
+func (m *model) firstDiffLine() int {
+	for i, d := range m.chMap {
+		if d.side != "" && d.line >= 0 {
+			return i
+		}
+	}
+	return 0
 }

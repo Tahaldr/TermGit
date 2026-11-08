@@ -392,10 +392,9 @@ func (m *model) tocWidth() int {
 	return max(24, min(36, m.w/4))
 }
 
-// rdWidth is the width of the text column: at most 100, centered
+// rdWidth is the width of the text column: the whole window, from the left
 func (m *model) rdWidth() int {
-	area := m.w - m.tocWidth() - 4
-	return max(20, min(100, area))
+	return max(20, m.w-m.tocWidth()-4)
 }
 
 func (m *model) rdRender() string {
@@ -464,7 +463,7 @@ func (m *model) rdRender() string {
 	}
 
 	area := m.w - tw
-	margin := max(0, (area-cw)/2)
+	margin := 2 // text starts at the left, like a normal file
 	for i := 0; i < rows; i++ {
 		l := ""
 		if tw > 0 {

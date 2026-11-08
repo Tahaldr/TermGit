@@ -40,6 +40,7 @@ type explorer struct {
 	query     [8]string
 	filtering bool
 	dirCur    map[string]int // where the cursor was in each folder, for going back
+	logRef    string         // local repo: whose commits the Commits section shows ("" = the current branch)
 }
 
 type exItem struct {
@@ -52,6 +53,9 @@ type exItem struct {
 	issue   *Issue
 	pr      *PR
 	ch      *change
+	lb      *lbranch
+	lc      *lcommit
+	st      *stashEntry
 }
 
 type appDoneMsg struct {
@@ -134,6 +138,17 @@ func (m *model) exItems() []exItem {
 			out = append(out, exItem{kind: k, ent: e})
 		}
 	case secCommits:
+		if dir := m.localPath(&ex.repo); dir != "" {
+			if ll := m.llogs[dir+"|"+ex.logRef]; ll != nil {
+				for i := range ll.items {
+					c := &ll.items[i]
+					if q == "" || fuzzy(strings.ToLower(c.subject+" "+c.author+" "+c.short+" "+c.refs), q) {
+						out = append(out, exItem{kind: "lcommit", lc: c})
+					}
+				}
+			}
+			return out
+		}
 		if cl := m.clists[m.treeKey()]; cl != nil {
 			for i := range cl.items {
 				c := &cl.items[i]
@@ -143,12 +158,19 @@ func (m *model) exItems() []exItem {
 			}
 		}
 	case secChanges:
-		if cl := m.changes[m.localPath(&ex.repo)]; cl != nil {
+		dir := m.localPath(&ex.repo)
+		if cl := m.changes[dir]; cl != nil {
 			for i := range cl.items {
 				c := &cl.items[i]
 				if q == "" || fuzzy(strings.ToLower(c.path), q) {
 					out = append(out, exItem{kind: "change", ch: c})
 				}
+			}
+		}
+		st := m.stashes[dir]
+		for i := range st {
+			if q == "" || fuzzy(strings.ToLower(st[i].msg), q) {
+				out = append(out, exItem{kind: "stash", st: &st[i]})
 			}
 		}
 	case secIssues:
@@ -188,6 +210,17 @@ func (m *model) exItems() []exItem {
 			}
 		}
 	case secBranches:
+		if dir := m.localPath(&ex.repo); dir != "" {
+			if bl := m.lbranches[dir]; bl != nil {
+				for i := range bl.items {
+					b := &bl.items[i]
+					if q == "" || fuzzy(strings.ToLower(b.name), q) {
+						out = append(out, exItem{kind: "lbranch", lb: b})
+					}
+				}
+			}
+			return out
+		}
 		if bl := m.blists[ex.repo.NameWithOwner]; bl != nil {
 			for i := range bl.items {
 				b := &bl.items[i]
@@ -258,12 +291,20 @@ func (m *model) exLoad() tea.Cmd {
 		}
 		cmds = append(cmds, m.load("tree:"+m.treeKey(), false, fetchTree(nwo, ex.ref, oid)))
 	case secCommits:
-		cmds = append(cmds, m.load("commits:"+m.treeKey(), false, fetchCommits(nwo, ex.ref)))
+		if dir := m.localPath(&ex.repo); dir != "" {
+			cmds = append(cmds, m.load("llog:"+dir+"|"+ex.logRef, false, fetchLog(dir, ex.logRef)))
+		} else {
+			cmds = append(cmds, m.load("commits:"+m.treeKey(), false, fetchCommits(nwo, ex.ref)))
+		}
 	case secBranches:
-		cmds = append(cmds, m.load("branches:"+nwo, false, fetchBranches(nwo, ex.repo.Branch())))
+		if dir := m.localPath(&ex.repo); dir != "" {
+			cmds = append(cmds, m.load("lbranches:"+dir, false, fetchLBranches(dir)))
+		} else {
+			cmds = append(cmds, m.load("branches:"+nwo, false, fetchBranches(nwo, ex.repo.Branch())))
+		}
 	case secChanges:
 		if dir := m.localPath(&ex.repo); dir != "" {
-			cmds = append(cmds, m.load("changes:"+dir, false, fetchChanges(dir)))
+			cmds = append(cmds, m.load("changes:"+dir, false, fetchChanges(dir)), m.load("stash:"+dir, false, fetchStash(dir)))
 		}
 	case secIssues:
 		q := m.exIssueQuery()
@@ -295,6 +336,17 @@ func (m *model) exLoad() tea.Cmd {
 		case "change":
 			dir := m.localPath(&ex.repo)
 			cmds = append(cmds, m.load("gitdiff:"+dir+"|"+it.ch.path, true, fetchFileDiff(dir, *it.ch)))
+		case "lbranch":
+			dir := m.localPath(&ex.repo)
+			if !it.lb.tag {
+				cmds = append(cmds, m.load("llog:"+dir+"|"+it.lb.name, true, fetchLog(dir, it.lb.name)))
+			}
+		case "lcommit":
+			dir := m.localPath(&ex.repo)
+			cmds = append(cmds, m.load("show:"+dir+"|"+it.lc.sha, true, fetchShow(dir, it.lc.sha, false)))
+		case "stash":
+			dir := m.localPath(&ex.repo)
+			cmds = append(cmds, m.load("show:"+dir+"|"+it.st.ref, true, fetchShow(dir, it.st.ref, true)))
 		case "pr":
 			cmds = append(cmds, m.loadPRDetail(it.pr, true))
 		}
@@ -326,7 +378,7 @@ func (m *model) exMove(d int) tea.Cmd {
 func (m *model) exSetSec(s int) tea.Cmd {
 	ex := m.ex
 	ex.sec = (s + len(secNames)) % len(secNames)
-	if ex.sec == secChanges {
+	if ex.sec == secChanges || ex.sec == secCommits || ex.sec == secBranches {
 		m.chForget(m.localPath(&ex.repo)) // always read the folder again
 	}
 	ex.filtering = false
@@ -398,8 +450,9 @@ func (m *model) exActivate() tea.Cmd {
 		m.focus = 1
 	case "run":
 		return m.actLogs()
-	case "change":
+	case "change", "lcommit":
 		m.focus = 1
+		m.chCur = m.firstDiffLine()
 	case "issue":
 		return m.issRead()
 	case "pr":
@@ -465,8 +518,24 @@ func (m *model) exKey(s string) tea.Cmd {
 			return cmd
 		}
 	}
-	if ex.sec == secChanges {
+	if ex.sec == secChanges && m.isLocal() {
+		if cmd, ok := m.chLineKey(s); ok {
+			return cmd
+		}
+		if cmd, ok := m.stashKey(s); ok {
+			return cmd
+		}
 		if cmd, ok := m.chKey(s); ok {
+			return cmd
+		}
+	}
+	if ex.sec == secBranches && m.isLocal() && m.focus == 0 {
+		if cmd, ok := m.lbKey(s); ok {
+			return cmd
+		}
+	}
+	if ex.sec == secCommits && m.isLocal() {
+		if cmd, ok := m.lcKey(s); ok {
 			return cmd
 		}
 	}
@@ -663,11 +732,21 @@ func (m *model) curURL() string {
 		}
 		return r.URL + "/tree/" + ref
 	case secCommits:
+		if ok && it.kind == "lcommit" {
+			return r.URL + "/commit/" + it.lc.sha
+		}
 		if ok {
 			return r.URL + "/commit/" + it.commit.Oid
 		}
 		return r.URL + "/commits/" + ref
 	case secBranches:
+		if ok && it.kind == "lbranch" {
+			n := it.lb.name
+			if it.lb.remote {
+				n = n[strings.Index(n, "/")+1:]
+			}
+			return r.URL + "/tree/" + escPath(n)
+		}
 		if ok {
 			return r.URL + "/tree/" + escPath(it.branch.Name)
 		}
@@ -779,6 +858,8 @@ func (m *model) exListBox(w, h, y0 int) []string {
 	m.exClamp()
 	empty := ""
 	switch {
+	case m.isLocal() && (ex.sec == secBranches || ex.sec == secCommits) && len(items) > 0:
+		// local lists: nothing to explain
 	case ex.ref == "":
 		empty = "This repo is empty."
 	case ex.sec == secCode && m.trees[m.treeKey()] == nil:
@@ -795,8 +876,12 @@ func (m *model) exListBox(w, h, y0 int) []string {
 		empty = "Reading your changes…"
 	case ex.sec == secChanges && m.changes[m.localPath(&ex.repo)].err != "":
 		empty = m.changes[m.localPath(&ex.repo)].err
-	case ex.sec == secChanges && len(items) == 0 && ex.query[ex.sec] == "":
+	case ex.sec == secChanges && len(items) == 0 && ex.query[ex.sec] == "" && len(m.stashes[m.localPath(&ex.repo)]) == 0:
 		empty = "✓ Nothing changed: everything is committed."
+	case ex.sec == secCommits && m.localPath(&ex.repo) != "" && m.llogs[m.localPath(&ex.repo)+"|"+ex.logRef] == nil:
+		empty = "Reading the history…"
+	case ex.sec == secBranches && m.localPath(&ex.repo) != "" && m.lbranches[m.localPath(&ex.repo)] == nil:
+		empty = "Reading your branches…"
 	case ex.sec == secIssues && m.issueLists[m.exIssueQuery()] == nil:
 		empty = "Loading issues…"
 	case ex.sec == secIssues && m.issueLists[m.exIssueQuery()].err != "":
@@ -851,6 +936,16 @@ func (m *model) exListBox(w, h, y0 int) []string {
 	if ex.sec == secChanges && m.localPath(&ex.repo) != "" {
 		note = m.changesNote() + "  " + note
 	}
+	if ex.sec == secCommits && m.localPath(&ex.repo) != "" {
+		ref := ex.logRef
+		if ref == "" {
+			ref = m.currentBranch()
+		}
+		note = icBranch + " " + ref + " · on this PC  " + note
+	}
+	if st := gitState(m.localPath(&ex.repo)); st != "" && m.localPath(&ex.repo) != "" && (ex.sec == secChanges || ex.sec == secBranches || ex.sec == secCommits) {
+		note = strings.ToUpper(st) + " in progress · ctrl+p Abort/Continue  " + note
+	}
 	if td := m.trees[m.treeKey()]; ex.sec == secCode && td != nil && td.truncated {
 		note = "big repo: some files missing · " + note
 	}
@@ -861,6 +956,12 @@ func (m *model) exRow(it exItem, w int, sel bool) string {
 	switch it.kind {
 	case "change":
 		return m.changeRow(it.ch, w, sel)
+	case "lbranch":
+		return m.lbranchRow(it.lb, w, sel)
+	case "lcommit":
+		return m.lcommitRow(it.lc, w, sel)
+	case "stash":
+		return m.stashRow(it.st, w, sel)
 	case "issue":
 		return m.issueRow(it.issue, w, sel, false)
 	case "pr":
@@ -1008,6 +1109,12 @@ func (m *model) exPreview(w int) (string, []string) {
 		return "Branch", m.branchPreview(it.branch, w)
 	case "change":
 		return path.Base(it.ch.path), m.changePreview(it.ch, w)
+	case "lbranch":
+		return "Branch", m.lbranchPreview(it.lb, w)
+	case "lcommit":
+		return "Commit " + it.lc.short, m.lcommitPreview(it.lc, w)
+	case "stash":
+		return "Stash", m.stashPreview(it.st, w)
 	case "issue":
 		return fmt.Sprintf("Issue #%d", it.issue.Number), m.issuePreview(it.issue, w)
 	case "pr":

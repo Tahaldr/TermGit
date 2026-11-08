@@ -61,6 +61,7 @@ const (
 	icComment   = ""
 	icMerge     = ""
 	icChanges   = ""
+	icCloud     = ""
 	icRead      = ""
 )
 

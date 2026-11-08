@@ -115,6 +115,14 @@ type model struct {
 	lastClick time.Time
 	lastIdx   int
 
+	// local git 2 (batch 8)
+	lbranches map[string]*lbranchList
+	llogs     map[string]*logList
+	stashes   map[string][]stashEntry
+	shows     map[string]*showData
+	chMap     []diffLine // Changes: where each diff line comes from
+	chCur     int        // Changes: the picked diff line
+
 	// local git (batch 7)
 	changes   map[string]*changeList
 	diffs     map[string]*fileDiff
@@ -173,6 +181,7 @@ func newModel() *model {
 		logs: map[string]map[int64]string{}, issueLists: map[string]*issueList{}, comments: map[string]*commentList{},
 		prLists: map[string]*prList{}, prDetails: map[string]*prDetail{}, prFilesMap: map[string]*prFiles{},
 		changes: map[string]*changeList{}, diffs: map[string]*fileDiff{},
+		lbranches: map[string]*lbranchList{}, llogs: map[string]*logList{}, stashes: map[string][]stashEntry{}, shows: map[string]*showData{},
 	}
 	m.loadRuns()
 	var c reposCache
@@ -1142,13 +1151,17 @@ func (m *model) actCopy() tea.Cmd {
 	if u == "" {
 		return nil
 	}
+	return m.copyText(u, "Copied "+u)
+}
+
+func (m *model) copyText(s, ok string) tea.Cmd {
 	if m.dump {
-		return m.setStatus("Would copy "+u, false)
+		return m.setStatus("Would copy "+s, false)
 	}
-	if err := clipboard.WriteAll(u); err != nil {
+	if err := clipboard.WriteAll(s); err != nil {
 		return m.setStatus("Couldn't copy: "+err.Error(), true)
 	}
-	return m.setStatus("Copied "+u, false)
+	return m.setStatus(ok, false)
 }
 
 // actClone asks to clone the repo; then = app to open right after ("" = none)
@@ -1371,6 +1384,10 @@ func (m *model) commands() []command {
 			return m.actPush()
 		}},
 		command{"Commit", "c", func(m *model) tea.Cmd { return m.chCommit(false) }},
+		command{"Abort the merge / rebase / cherry-pick", "", func(m *model) tea.Cmd { return m.gitAbort() }},
+		command{"Continue the merge / rebase / cherry-pick (after fixing conflicts)", "", func(m *model) tea.Cmd { return m.gitContinue() }},
+		command{"Stash my changes", "s", func(m *model) tea.Cmd { cmd, _ := m.stashKey("s"); return cmd }},
+		command{"New branch", "n", func(m *model) tea.Cmd { cmd, _ := m.lbKey("n"); return cmd }},
 		command{"Commit (message in Nvim)", "C", func(m *model) tea.Cmd { return m.chCommit(true) }},
 		command{"Amend the last commit", "A", func(m *model) tea.Cmd { return m.chAmend() }},
 		command{"Fetch from GitHub", "f", func(m *model) tea.Cmd { cmd, _ := m.chKey("f"); return cmd }},
@@ -1900,8 +1917,16 @@ func (m *model) hintBar(y int) string {
 		h = [][2]string{{"j/k", "move"}, {"enter", "logs"}, {"R", "re-run"}, {"x", "cancel"}, {"w", "start workflow"}, {"f", "failed/running"}, {"/", "find"}, {"ctrl+p", "commands"}, {"?", "keys"}}
 	case m.tab != tabRepos:
 		h = [][2]string{{"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
+	case m.ex != nil && m.ex.sec == secChanges && m.focus == 1 && m.chSel() != nil:
+		h = [][2]string{{"j/k", "pick a line"}, {"space", "stage / unstage line"}, {"a", "whole hunk"}, {"esc", "back"}, {"?", "keys"}}
+	case m.ex != nil && m.ex.sec == secChanges && m.focus == 0 && m.selStash() != nil:
+		h = [][2]string{{"enter", "pop / apply / drop"}, {"d", "drop"}, {"s", "stash"}, {"esc", "back"}, {"[ ]", "section"}}
+	case m.ex != nil && m.ex.sec == secBranches && m.focus == 0 && m.isLocal():
+		h = [][2]string{{"space", "switch"}, {"enter", "commits"}, {"n", "new"}, {"M", "merge"}, {"B", "rebase"}, {"R", "rename"}, {"D", "delete"}, {"P", "push tag"}, {"b", "code"}, {"esc", "back"}}
+	case m.ex != nil && m.ex.sec == secCommits && m.focus == 0 && m.isLocal():
+		h = [][2]string{{"enter", "changes"}, {"C", "cherry-pick"}, {"t", "revert"}, {"X", "reset"}, {"T", "tag"}, {"y", "copy id"}, {"space", "check out"}, {"esc", "back"}}
 	case m.ex != nil && m.ex.sec == secChanges && m.focus == 0:
-		h = [][2]string{{"space", "stage"}, {"a", "all"}, {"d", "discard"}, {"c", "commit"}, {"A", "amend"}, {"p", "pull"}, {"P", "push"}, {"f", "fetch"}, {"e", "nvim"}, {"esc", "back"}, {"[ ]", "section"}}
+		h = [][2]string{{"space", "stage"}, {"a", "all"}, {"enter", "pick lines"}, {"d", "discard"}, {"c", "commit"}, {"s", "stash"}, {"p", "pull"}, {"P", "push"}, {"esc", "back"}, {"[ ]", "section"}}
 	case m.ex != nil && m.ex.sec == secPRs && m.focus == 0:
 		h = [][2]string{{"j/k", "move"}, {"enter", "read"}, {"{ }", "views"}, {"m", "merge"}, {"R", "review"}, {"C", "comment"}, {"K", "check out"}, {"N", "new"}, {"esc", "back"}, {"[ ]", "section"}}
 	case m.ex != nil && m.ex.sec == secPRs && m.focus == 1:
@@ -2000,6 +2025,29 @@ func helpLines(w int) []string {
 		row("A", "amend the last commit"),
 		row("p  P  f", "pull / push / fetch"),
 		row("e", "open the file in Nvim"),
+		"",
+		row("enter", "pick single lines in the diff: space stages one, a the whole hunk"),
+		row("s  S", "stash: put your changes aside (S chooses which); stashes are listed at the bottom"),
+		"",
+		sec("Branches — a repo on this PC"),
+		row("space", "switch to it (a GitHub-only branch gets a local copy)"),
+		row("enter", "its commits"),
+		row("n", "new branch from the one you're on"),
+		row("M  B", "merge it into yours / rebase yours onto it"),
+		row("R  D", "rename / delete (GitHub-only and tags too)"),
+		row("u", "link it to a GitHub branch"),
+		row("P", "on a tag: push the tag"),
+		row("b", "browse its code on GitHub"),
+		"",
+		sec("Commits — a repo on this PC (with the graph)"),
+		row("enter", "what changed"),
+		row("C", "cherry-pick: copy it onto your branch"),
+		row("t", "revert: undo it with a new commit"),
+		row("X", "reset your branch to it: soft / mixed / hard"),
+		row("T", "tag it"),
+		row("y", "copy its id"),
+		row("space", "check it out (no branch)"),
+		row("ctrl+p", "Abort / Continue when a merge or rebase stops on conflicts"),
 		"",
 		sec("PR comments — the Comments view"),
 		row("j / k", "pick a comment (right panel focused: tab or a click)"),
