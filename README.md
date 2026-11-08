@@ -12,8 +12,8 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | 3 | Markdown reader: Nvim-style markdown, full-screen reader, Contents, `termgit file.md` | done |
 | 4 | Actions + Releases: CI runs, logs, re-run, cancel, start workflows, releases | done |
 | 5 | Issues: read, comment, create, close / reopen, labels, edit in Nvim | done |
-| 6 | PRs | next |
-| 7 | Home + Inbox | |
+| 6 | PRs: overview, commits, checks, files, merge, review, comment, check out, create | done |
+| 7 | Home + Inbox | next |
 | 8 | Explore + repo management | |
 | 9 | Polish: settings, help page, tests | |
 
@@ -36,6 +36,14 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | `v` | read full screen (README, file, commit) |
 | `esc` | back |
 | `q` | quit |
+
+## Pull requests
+
+- **PRs tab** (`4`): PRs in your repos. `f` switches Your repos / Review requests / Created / Involved, `s` open / closed+merged.
+- Inside a repo: the **PRs** section.
+- Views on the right: Overview, Commits, Checks, Files: `[` / `]` (in a repo `{` / `}`), or click them.
+- `enter` shows the view full screen (Files: every file is a heading; Checks: the failing check's logs).
+- `m` merge (squash / merge commit / rebase, keep or delete the branch), `R` review, `C` comment, `x` close / reopen, `K` check out locally, `N` new PR.
 
 ## Issues
 

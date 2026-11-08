@@ -59,6 +59,7 @@ const (
 	icIssueDone = ""
 	icIssueNo   = ""
 	icComment   = ""
+	icMerge     = ""
 	icRead      = ""
 )
 

@@ -277,16 +277,21 @@ func (m *model) issMove(d int) tea.Cmd {
 // forget loaded issue lists (and one conversation) so they're fetched again
 func (m *model) issForget(nwo string, n int) {
 	for k := range m.loaded {
-		if strings.HasPrefix(k, "issues:") {
+		if strings.HasPrefix(k, "issues:") || strings.HasPrefix(k, "prs:") {
 			delete(m.loaded, k)
 		}
 	}
-	delete(m.loaded, fmt.Sprintf("comments:%s#%d", nwo, n))
+	for _, p := range []string{"comments:", "prdetail:", "prfiles:"} {
+		delete(m.loaded, fmt.Sprintf("%s%s#%d", p, nwo, n))
+	}
 }
 
 func (m *model) issReload() tea.Cmd {
 	if m.tab == tabIssues {
 		return m.issLoad()
+	}
+	if m.tab == tabPRs {
+		return m.prLoad()
 	}
 	if m.exActive() != nil {
 		return m.exLoad()

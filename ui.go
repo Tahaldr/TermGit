@@ -22,13 +22,14 @@ type tabInfo struct {
 }
 
 var tabs = []tabInfo{
-	{"Home", icHome, 7}, {"Repos", icRepo, 0}, {"Issues", icIssue, 0}, {"PRs", icPR, 6},
+	{"Home", icHome, 7}, {"Repos", icRepo, 0}, {"Issues", icIssue, 0}, {"PRs", icPR, 0},
 	{"Actions", icActions, 0}, {"Inbox", icInbox, 7}, {"Explore", icExplore, 8},
 }
 
 const (
 	tabRepos   = 1
 	tabIssues  = 2
+	tabPRs     = 3
 	tabActions = 4
 )
 
@@ -114,6 +115,12 @@ type model struct {
 	lastClick time.Time
 	lastIdx   int
 
+	// pull requests (batch 6)
+	prs        prState
+	prLists    map[string]*prList
+	prDetails  map[string]*prDetail
+	prFilesMap map[string]*prFiles
+
 	// issues (batch 5)
 	iss        issState
 	issueLists map[string]*issueList
@@ -159,6 +166,7 @@ func newModel() *model {
 		blists: map[string]*branchList{}, lines: map[string][]string{},
 		runs: map[string]*runList{}, jobs: map[string]*jobList{}, releases: map[string]*releaseList{},
 		logs: map[string]map[int64]string{}, issueLists: map[string]*issueList{}, comments: map[string]*commentList{},
+		prLists: map[string]*prList{}, prDetails: map[string]*prDetail{}, prFilesMap: map[string]*prFiles{},
 	}
 	m.loadRuns()
 	var c reposCache
@@ -421,6 +429,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.issReload()
 	case repoLabelsMsg:
 		return m, m.onRepoLabels(msg)
+	case runFetchedMsg:
+		if msg.err != nil {
+			return m, m.setStatus("Couldn't open the logs: "+apiErr(msg.err), true)
+		}
+		m.status = ""
+		return m, m.actLogsFor(msg.run)
+	case checkoutMsg:
+		cmd := m.scanLocalInfo()
+		if msg.err != nil {
+			return m, tea.Batch(cmd, m.setStatus("Checkout failed: "+msg.err.Error(), true))
+		}
+		return m, tea.Batch(cmd, m.setStatus(fmt.Sprintf("Checked out #%d", msg.n), false))
 	case reloadMsg:
 		return m, m.onReload(msg.key)
 	case ciDoneMsg:
@@ -460,6 +480,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.tab == tabIssues && m.rd == nil {
 			return m, m.loadComments(m.selIssue(), true)
+		}
+		if m.tab == tabPRs && m.rd == nil {
+			return m, m.loadPRDetail(m.selPR(), true)
 		}
 		if m.exActive() != nil {
 			m.exClamp()
@@ -519,6 +542,9 @@ func (m *model) setTab(i int) tea.Cmd {
 	}
 	if i == tabIssues {
 		return m.issSelected()
+	}
+	if i == tabPRs {
+		return m.prSelected()
 	}
 	return nil
 }
@@ -637,6 +663,27 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	// typing a search in the PRs tab
+	if m.tab == tabPRs && m.prs.filtering {
+		switch s {
+		case "esc":
+			m.prs.filtering, m.prs.query = false, ""
+			return m.prSelected()
+		case "enter":
+			m.prs.filtering = false
+			return nil
+		case "down", "ctrl+n", "ctrl+j":
+			return m.prMove(1)
+		case "up", "ctrl+k":
+			return m.prMove(-1)
+		}
+		if editText(&m.prs.query, k) {
+			m.prs.cur, m.prs.off = 0, 0
+			return m.prSelected()
+		}
+		return nil
+	}
+
 	// typing a search in the Issues tab
 	if m.tab == tabIssues && m.iss.filtering {
 		switch s {
@@ -724,6 +771,11 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 			return m.exBack()
 		case m.focus == 1:
 			m.focus = 0
+		case m.tab == tabPRs && m.prs.query != "":
+			m.prs.query = ""
+			return m.prSelected()
+		case m.tab == tabPRs:
+			return nil
 		case m.tab == tabIssues && m.iss.query != "":
 			m.iss.query = ""
 			return m.issSelected()
@@ -754,6 +806,9 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.tab == tabIssues {
 		return m.issTabKey(s)
+	}
+	if m.tab == tabPRs {
+		return m.prTabKey(s)
 	}
 	if m.tab != tabRepos {
 		return nil
@@ -895,9 +950,28 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 	case "list":
 		m.focus = 0
 	case "preview":
-		if m.tab == tabRepos || m.tab == tabActions || m.tab == tabIssues {
+		if m.tab == tabRepos || m.tab == tabActions || m.tab == tabIssues || m.tab == tabPRs {
 			m.focus = 1
 		}
+	case "prrow":
+		m.focus = 0
+		double := z.idx == m.lastIdx && time.Since(m.lastClick) < 400*time.Millisecond
+		m.lastIdx, m.lastClick = z.idx, time.Now()
+		var cmd tea.Cmd
+		if z.idx != m.prs.cur {
+			m.prs.cur = z.idx
+			cmd = m.prSelected()
+		}
+		if double {
+			m.lastIdx = -1
+			return tea.Batch(cmd, m.prRead())
+		}
+		return cmd
+	case "prscope":
+		m.prs.scope, m.prs.cur, m.prs.off = z.idx, 0, 0
+		return m.prSelected()
+	case "prview":
+		return m.prSetView(z.idx)
 	case "issrow":
 		m.focus = 0
 		double := z.idx == m.lastIdx && time.Since(m.lastClick) < 400*time.Millisecond
@@ -973,12 +1047,17 @@ func (m *model) wheel(ms tea.Mouse) tea.Cmd {
 		return m.actMove(d)
 	case "issrow":
 		return m.issMove(d)
+	case "prrow":
+		return m.prMove(d)
 	case "row", "list":
 		if m.tab == tabActions {
 			return m.actMove(d)
 		}
 		if m.tab == tabIssues {
 			return m.issMove(d)
+		}
+		if m.tab == tabPRs {
+			return m.prMove(d)
 		}
 		if m.exActive() != nil {
 			return m.exMove(d)
@@ -1076,6 +1155,9 @@ func (m *model) buttons() []button {
 	if b := m.issButtons(); b != nil {
 		return b
 	}
+	if b := m.prButtons(); b != nil {
+		return b
+	}
 	if b := m.ciButtons(); b != nil {
 		return b
 	}
@@ -1104,6 +1186,21 @@ func (m *model) runButton(i int) tea.Cmd {
 		return nil
 	}
 	switch b[i].id {
+	case "prread":
+		return m.prRead()
+	case "prmerge":
+		return m.prMerge()
+	case "prreview":
+		return m.prReview()
+	case "prcomment":
+		return m.prComment()
+	case "prcheckout":
+		return m.prCheckout()
+	case "prnew":
+		return m.prNew()
+	case "prstate":
+		cmd, _ := m.prKeys("s")
+		return cmd
 	case "issread":
 		return m.issRead()
 	case "isscomment":
@@ -1151,6 +1248,9 @@ func (m *model) runButton(i int) tea.Cmd {
 		}
 		if m.tab == tabIssues {
 			return m.issTabKey("r")
+		}
+		if m.tab == tabPRs {
+			return m.prTabKey("r")
 		}
 		if m.exActive() != nil {
 			return m.exRefresh()
@@ -1210,6 +1310,11 @@ func (m *model) commands() []command {
 			return m.refresh()
 		}},
 		command{"Show all keys", "?", func(m *model) tea.Cmd { m.help = true; m.pvOff = 0; return nil }},
+		command{"Merge the PR", "m", func(m *model) tea.Cmd { return m.prMerge() }},
+		command{"Review the PR (approve / request changes)", "R", func(m *model) tea.Cmd { return m.prReview() }},
+		command{"Check out the PR locally", "K", func(m *model) tea.Cmd { return m.prCheckout() }},
+		command{"Mark PR ready for review", "", func(m *model) tea.Cmd { return m.prReady() }},
+		command{"New pull request", "N", func(m *model) tea.Cmd { return m.prNew() }},
 		command{"New issue", "N", func(m *model) tea.Cmd { return m.issNew() }},
 		command{"Comment on the issue", "C", func(m *model) tea.Cmd { return m.issComment() }},
 		command{"Close / reopen the issue", "x", func(m *model) tea.Cmd { return m.issToggle() }},
@@ -1270,6 +1375,8 @@ func (m *model) render() string {
 			left = m.actListBox(lw, ph, 2)
 		} else if m.tab == tabIssues {
 			left = m.issListBox(lw, ph, 2)
+		} else if m.tab == tabPRs {
+			left = m.prListBox(lw, ph, 2)
 		} else {
 			left = m.listBox(lw, ph, 2)
 		}
@@ -1324,6 +1431,11 @@ func (m *model) pathBar() string {
 		out = m.exPathBar()
 		if m.help {
 			out += sep + fg(cTxt).Render("Keys")
+		}
+	} else if m.tab == tabPRs {
+		out += sep + fg(cHint).Render(prScopes[m.prs.scope])
+		if p := m.selPR(); p != nil {
+			out += sep + fg(cTxt).Render(p.repo()) + sep + fg(cTxt).Render(fmt.Sprintf("#%d", p.Number)) + sep + fg(cHint).Render(prViews[m.prs.view])
 		}
 	} else if m.tab == tabIssues {
 		out += sep + fg(cHint).Render(issScopes[m.iss.scope])
@@ -1472,6 +1584,8 @@ func (m *model) previewBox(w, h, x0, y0 int) []string {
 		title, lines = m.actPreview(inner)
 	case m.tab == tabIssues:
 		title, lines = m.issPreview(inner)
+	case m.tab == tabPRs:
+		title, lines = m.prPanel(inner, x0)
 	case m.tab != tabRepos:
 		t := tabs[m.tab]
 		title = t.name
@@ -1674,6 +1788,12 @@ func (m *model) hintBar(y int) string {
 	}
 	var h [][2]string
 	switch {
+	case m.tab == tabPRs && m.prs.filtering:
+		h = [][2]string{{"type", "to find"}, {"↑↓", "move"}, {"enter", "keep"}, {"esc", "clear"}}
+	case m.tab == tabPRs && m.focus == 1:
+		h = [][2]string{{"j/k", "scroll"}, {"[ ]", "views"}, {"esc", "back"}, {"enter", "full screen"}, {"m", "merge"}, {"R", "review"}, {"C", "comment"}, {"?", "keys"}}
+	case m.tab == tabPRs:
+		h = [][2]string{{"j/k", "move"}, {"enter", "read"}, {"[ ]", "views"}, {"m", "merge"}, {"R", "review"}, {"C", "comment"}, {"K", "check out"}, {"N", "new"}, {"s", "open/closed"}, {"f", "scope"}, {"?", "keys"}}
 	case m.tab == tabIssues && m.iss.filtering:
 		h = [][2]string{{"type", "to find"}, {"↑↓", "move"}, {"enter", "keep"}, {"esc", "clear"}}
 	case m.tab == tabIssues && m.focus == 1:
@@ -1686,6 +1806,10 @@ func (m *model) hintBar(y int) string {
 		h = [][2]string{{"j/k", "move"}, {"enter", "logs"}, {"R", "re-run"}, {"x", "cancel"}, {"w", "start workflow"}, {"f", "failed/running"}, {"/", "find"}, {"ctrl+p", "commands"}, {"?", "keys"}}
 	case m.tab != tabRepos:
 		h = [][2]string{{"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
+	case m.ex != nil && m.ex.sec == secPRs && m.focus == 0:
+		h = [][2]string{{"j/k", "move"}, {"enter", "read"}, {"{ }", "views"}, {"m", "merge"}, {"R", "review"}, {"C", "comment"}, {"K", "check out"}, {"N", "new"}, {"esc", "back"}, {"[ ]", "section"}}
+	case m.ex != nil && m.ex.sec == secPRs && m.focus == 1:
+		h = [][2]string{{"j/k", "scroll"}, {"[ ]", "views"}, {"esc", "back"}, {"enter", "full screen"}, {"m", "merge"}, {"R", "review"}, {"?", "keys"}}
 	case m.ex != nil && m.ex.sec == secIssues && m.focus == 0:
 		h = [][2]string{{"j/k", "move"}, {"enter", "read"}, {"C", "comment"}, {"N", "new"}, {"x", "close/reopen"}, {"t", "labels"}, {"s", "open/closed"}, {"esc", "back"}, {"[ ]", "section"}}
 	case m.ex != nil && m.ex.sec == secActions && m.focus == 0:
@@ -1770,6 +1894,18 @@ func helpLines(w int) []string {
 		row("●", "files changed but not committed"),
 		row("↑2", "2 commits not pushed to GitHub"),
 		row("↓3  ↓", "GitHub has 3 (or some) new commits: pull in lazygit"),
+		"",
+		sec("Pull requests — the PRs tab, or a repo's PRs section"),
+		row("[  ]", "views: Overview, Commits, Checks, Files (or click them)"),
+		row("{  }", "the same inside a repo (where [ ] switch sections)"),
+		row("enter  v", "the view full screen: conversation, commits, a failing check's logs, the changes"),
+		row("m", "merge: squash / merge commit / rebase, then keep or delete the branch"),
+		row("R", "review: approve, request changes, or comment"),
+		row("C", "comment (written in Nvim)"),
+		row("K", "check it out in your local copy"),
+		row("x", "close / reopen"),
+		row("N", "new PR: from branch, into branch, title, description"),
+		row("s  f", "open / closed+merged, and scope (yours, review requests…)"),
 		"",
 		sec("Issues — the Issues tab, or a repo's Issues section"),
 		row("enter  v", "read the whole conversation (each message is a heading)"),

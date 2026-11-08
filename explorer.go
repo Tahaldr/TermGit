@@ -19,14 +19,15 @@ import (
 const (
 	secCode = iota
 	secIssues
+	secPRs
 	secCommits
 	secBranches
 	secActions
 	secReleases
 )
 
-var secNames = []string{"Code", "Issues", "Commits", "Branches", "Actions", "Releases"}
-var secIcons = []string{icCode, icIssue, icCommit, icBranch, icActions, icTag}
+var secNames = []string{"Code", "Issues", "PRs", "Commits", "Branches", "Actions", "Releases"}
+var secIcons = []string{icCode, icIssue, icPR, icCommit, icBranch, icActions, icTag}
 
 type explorer struct {
 	repo      Repo
@@ -34,8 +35,8 @@ type explorer struct {
 	refOid    string
 	sec       int
 	dir       string // folder shown in Code ("" = top)
-	cur, off  [6]int
-	query     [6]string
+	cur, off  [7]int
+	query     [7]string
 	filtering bool
 	dirCur    map[string]int // where the cursor was in each folder, for going back
 }
@@ -48,6 +49,7 @@ type exItem struct {
 	run     *Run
 	release *Release
 	issue   *Issue
+	pr      *PR
 }
 
 type appDoneMsg struct {
@@ -147,6 +149,15 @@ func (m *model) exItems() []exItem {
 				}
 			}
 		}
+	case secPRs:
+		if pl := m.prLists[m.exPRQuery()]; pl != nil {
+			for i := range pl.items {
+				p := &pl.items[i]
+				if q == "" || fuzzy(strings.ToLower(p.Title+" "+p.Head+fmt.Sprintf(" #%d", p.Number)), q) {
+					out = append(out, exItem{kind: "pr", pr: p})
+				}
+			}
+		}
 	case secActions:
 		if rl := m.runs[ex.repo.NameWithOwner]; rl != nil {
 			for i := range rl.items {
@@ -242,6 +253,9 @@ func (m *model) exLoad() tea.Cmd {
 	case secIssues:
 		q := m.exIssueQuery()
 		cmds = append(cmds, m.load("issues:"+q, false, fetchIssues(q)))
+	case secPRs:
+		q := m.exPRQuery()
+		cmds = append(cmds, m.load("prs:"+q, false, fetchPRs(q)))
 	case secActions:
 		cmds = append(cmds, m.load("runs:"+nwo, false, fetchRuns(nwo)))
 	case secReleases:
@@ -263,6 +277,8 @@ func (m *model) exLoad() tea.Cmd {
 			cmds = append(cmds, m.loadJobs(it.run, true))
 		case "issue":
 			cmds = append(cmds, m.loadComments(it.issue, true))
+		case "pr":
+			cmds = append(cmds, m.loadPRDetail(it.pr, true))
 		}
 	}
 	return tea.Batch(cmds...)
@@ -363,13 +379,15 @@ func (m *model) exActivate() tea.Cmd {
 		return m.actLogs()
 	case "issue":
 		return m.issRead()
+	case "pr":
+		return m.prRead()
 	case "release":
 		return m.actRead()
 	case "branch":
 		ex.ref, ex.refOid = it.branch.Name, it.branch.Commit.Oid
 		ex.dir, ex.cur[secCode], ex.off[secCode], ex.cur[secCommits], ex.off[secCommits] = "", 0, 0, 0, 0
 		ex.dirCur = map[string]int{}
-		ex.query = [6]string{}
+		ex.query = [7]string{}
 		cmd := m.exSetSec(secCode)
 		return tea.Batch(cmd, m.setStatus("Showing branch "+ex.ref, false))
 	}
@@ -426,6 +444,11 @@ func (m *model) exKey(s string) tea.Cmd {
 	}
 	if ex.sec == secIssues {
 		if cmd, ok := m.issueKey(s); ok {
+			return cmd
+		}
+	}
+	if ex.sec == secPRs {
+		if cmd, ok := m.prKeys(s); ok {
 			return cmd
 		}
 	}
@@ -577,6 +600,12 @@ func (m *model) curURL() string {
 		}
 		return ""
 	}
+	if m.tab == tabPRs {
+		if p := m.selPR(); p != nil {
+			return p.URL
+		}
+		return ""
+	}
 	r := m.curRepo()
 	if r == nil {
 		return ""
@@ -613,6 +642,11 @@ func (m *model) curURL() string {
 			return it.issue.URL
 		}
 		return r.URL + "/issues"
+	case secPRs:
+		if ok {
+			return it.pr.URL
+		}
+		return r.URL + "/pulls"
 	case secActions:
 		if ok {
 			return it.run.URL
@@ -692,7 +726,7 @@ func (m *model) exListBox(w, h, y0 int) []string {
 		if ex.filtering {
 			cursor = fg(cAcc).Render("▏")
 		}
-		what := map[int]string{secCode: "find a file", secCommits: "find a commit", secBranches: "find a branch", secActions: "find a run", secReleases: "find a release", secIssues: "find an issue"}[ex.sec]
+		what := map[int]string{secCode: "find a file", secCommits: "find a commit", secBranches: "find a branch", secActions: "find a run", secReleases: "find a release", secIssues: "find an issue", secPRs: "find a PR"}[ex.sec]
 		q := fg(cTxt).Render(ex.query[ex.sec])
 		if ex.query[ex.sec] == "" {
 			q = ""
@@ -726,6 +760,14 @@ func (m *model) exListBox(w, h, y0 int) []string {
 		empty = "No closed issues. s shows open ones."
 	case ex.sec == secIssues && len(items) == 0 && ex.query[ex.sec] == "":
 		empty = "No open issues. N makes one, s shows closed."
+	case ex.sec == secPRs && m.prLists[m.exPRQuery()] == nil:
+		empty = "Loading pull requests…"
+	case ex.sec == secPRs && m.prLists[m.exPRQuery()].err != "":
+		empty = m.prLists[m.exPRQuery()].err
+	case ex.sec == secPRs && len(items) == 0 && ex.query[ex.sec] == "" && m.prs.closed:
+		empty = "No closed or merged PRs. s shows open ones."
+	case ex.sec == secPRs && len(items) == 0 && ex.query[ex.sec] == "":
+		empty = "No open PRs. N opens one, s shows closed."
 	case ex.sec == secActions && m.runs[ex.repo.NameWithOwner] == nil:
 		empty = "Loading runs…"
 	case ex.sec == secActions && m.runs[ex.repo.NameWithOwner].err != "":
@@ -771,6 +813,8 @@ func (m *model) exRow(it exItem, w int, sel bool) string {
 	switch it.kind {
 	case "issue":
 		return m.issueRow(it.issue, w, sel, false)
+	case "pr":
+		return m.prRow(it.pr, w, sel, false)
 	case "run":
 		return m.runRow(it.run, w, sel, false)
 	case "release":
@@ -879,6 +923,8 @@ func (m *model) exPreview(w int) (string, []string) {
 			return "Branch", nil
 		case secIssues:
 			return "Issue", nil
+		case secPRs:
+			return "Pull request", nil
 		case secActions:
 			return "Run", nil
 		case secReleases:
@@ -910,6 +956,9 @@ func (m *model) exPreview(w int) (string, []string) {
 		return "Branch", m.branchPreview(it.branch, w)
 	case "issue":
 		return fmt.Sprintf("Issue #%d", it.issue.Number), m.issuePreview(it.issue, w)
+	case "pr":
+		lw, _ := m.layout()
+		return m.prTitle(it.pr, lw, 2), m.prPreview(it.pr, w)
 	case "run":
 		return fmt.Sprintf("Run #%d", it.run.Number), m.runPreview(it.run, w)
 	case "release":

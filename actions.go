@@ -702,8 +702,9 @@ var (
 	logDocs = map[string]map[int]mdDoc{}
 )
 
-func (m *model) actLogs() tea.Cmd {
-	r := m.selRun()
+func (m *model) actLogs() tea.Cmd { return m.actLogsFor(m.selRun()) }
+
+func (m *model) actLogsFor(r *Run) tea.Cmd {
 	if r == nil {
 		return nil
 	}
