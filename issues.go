@@ -613,8 +613,9 @@ func (m *model) onRepoLabels(msg repoLabelsMsg) tea.Cmd {
 
 // ---- reading the conversation full screen ----
 
-func (m *model) issRead() tea.Cmd {
-	is := m.selIssue()
+func (m *model) issRead() tea.Cmd { return m.issReadFor(m.selIssue()) }
+
+func (m *model) issReadFor(is *Issue) tea.Cmd {
 	if is == nil {
 		return nil
 	}

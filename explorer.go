@@ -748,6 +748,12 @@ func (m *model) curURL() string {
 		}
 		return ""
 	}
+	if m.tab == tabInbox {
+		if n := m.selNotif(); n != nil {
+			return n.webURL()
+		}
+		return ""
+	}
 	r := m.curRepo()
 	if r == nil {
 		return ""

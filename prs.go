@@ -753,8 +753,9 @@ type runFetchedMsg struct {
 	err error
 }
 
-func (m *model) prRead() tea.Cmd {
-	p := m.selPR()
+func (m *model) prRead() tea.Cmd { return m.prReadFor(m.selPR()) }
+
+func (m *model) prReadFor(p *PR) tea.Cmd {
 	if p == nil {
 		return nil
 	}

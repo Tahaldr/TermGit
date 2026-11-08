@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const version = "0.9.1"
+const version = "0.10.0"
 
 func main() {
 	args := os.Args[1:]

@@ -22,15 +22,17 @@ type tabInfo struct {
 }
 
 var tabs = []tabInfo{
-	{"Home", icHome, 7}, {"Repos", icRepo, 0}, {"Issues", icIssue, 0}, {"PRs", icPR, 0},
-	{"Actions", icActions, 0}, {"Inbox", icInbox, 7}, {"Explore", icExplore, 8},
+	{"Home", icHome, 0}, {"Repos", icRepo, 0}, {"Issues", icIssue, 0}, {"PRs", icPR, 0},
+	{"Actions", icActions, 0}, {"Inbox", icInbox, 0}, {"Explore", icExplore, 8},
 }
 
 const (
+	tabHome    = 0
 	tabRepos   = 1
 	tabIssues  = 2
 	tabPRs     = 3
 	tabActions = 4
+	tabInbox   = 5
 )
 
 // a clickable area of the screen, recorded while drawing
@@ -115,6 +117,16 @@ type model struct {
 	lastClick time.Time
 	lastIdx   int
 
+	// home + inbox (batch 10)
+	home     homeState
+	inbox    inboxState
+	notifs   map[bool]*notifList // false = unread, true = all
+	unread   int
+	subjects map[string]*subject
+	contrib  *contribData
+	events   *eventList
+	liveN    int
+
 	// local git 2 (batch 8)
 	lbranches map[string]*lbranchList
 	llogs     map[string]*logList
@@ -183,6 +195,7 @@ func newModel() *model {
 		logs: map[string]map[int64]string{}, issueLists: map[string]*issueList{}, comments: map[string]*commentList{},
 		prLists: map[string]*prList{}, prDetails: map[string]*prDetail{}, prFilesMap: map[string]*prFiles{},
 		changes: map[string]*changeList{}, diffs: map[string]*fileDiff{},
+		notifs: map[bool]*notifList{}, subjects: map[string]*subject{},
 		lbranches: map[string]*lbranchList{}, llogs: map[string]*logList{}, stashes: map[string][]stashEntry{}, shows: map[string]*showData{},
 	}
 	m.loadRuns()
@@ -202,7 +215,7 @@ func (m *model) Init() tea.Cmd {
 		return watch()
 	}
 	m.loading = true
-	cmds := []tea.Cmd{fetchRepos(), m.onSelect(), m.scanLocalInfo()}
+	cmds := []tea.Cmd{fetchRepos(), m.onSelect(), m.scanLocalInfo(), m.load("notifs:false", false, fetchNotifs(false))}
 	if !m.dump {
 		cmds = append(cmds, live())
 	}
@@ -444,7 +457,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case localMsg:
 		m.linfo = msg
 	case liveTick:
+		m.liveN++
+		if m.liveN%12 == 0 { // notifications: every minute
+			delete(m.loaded, "notifs:false")
+			if m.tab == tabInbox {
+				m.inboxForget()
+				return m, tea.Batch(m.onLive(), m.inboxLoad(), m.load("notifs:false", false, fetchNotifs(false)))
+			}
+			return m, tea.Batch(m.onLive(), m.load("notifs:false", false, fetchNotifs(false)))
+		}
 		return m, m.onLive()
+	case inboxDoneMsg:
+		return m, m.onInboxDone(msg)
 	case editedMsg:
 		return m, m.onEdited(msg)
 	case issueDoneMsg:
@@ -508,6 +532,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.tab == tabIssues && m.rd == nil {
 			return m, m.loadComments(m.selIssue(), true)
 		}
+		if m.tab == tabInbox && m.rd == nil {
+			return m, m.loadSubject(m.selNotif(), true)
+		}
 		if m.tab == tabPRs && m.rd == nil {
 			return m, m.loadPRDetail(m.selPR(), true)
 		}
@@ -569,6 +596,12 @@ func (m *model) setTab(i int) tea.Cmd {
 	}
 	if i == tabIssues {
 		return m.issSelected()
+	}
+	if i == tabHome {
+		return m.homeLoad()
+	}
+	if i == tabInbox {
+		return m.inboxSelected()
 	}
 	if i == tabPRs {
 		return m.prSelected()
@@ -690,6 +723,27 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	// typing a search in the Inbox
+	if m.tab == tabInbox && m.inbox.filtering {
+		switch s {
+		case "esc":
+			m.inbox.filtering, m.inbox.query = false, ""
+			return m.inboxSelected()
+		case "enter":
+			m.inbox.filtering = false
+			return nil
+		case "down", "ctrl+n", "ctrl+j":
+			return m.inboxMove(1)
+		case "up", "ctrl+k":
+			return m.inboxMove(-1)
+		}
+		if editText(&m.inbox.query, k) {
+			m.inbox.cur, m.inbox.off = 0, 0
+			return m.inboxSelected()
+		}
+		return nil
+	}
+
 	// typing a search in the PRs tab
 	if m.tab == tabPRs && m.prs.filtering {
 		switch s {
@@ -798,6 +852,11 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 			return m.exBack()
 		case m.focus == 1:
 			m.focus = 0
+		case m.tab == tabInbox && m.inbox.query != "":
+			m.inbox.query = ""
+			return m.inboxSelected()
+		case m.tab == tabInbox || m.tab == tabHome:
+			return nil
 		case m.tab == tabPRs && m.prs.query != "":
 			m.prs.query = ""
 			return m.prSelected()
@@ -830,6 +889,12 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.tab == tabActions {
 		return m.actKey(s)
+	}
+	if m.tab == tabHome {
+		return m.homeKey(s)
+	}
+	if m.tab == tabInbox {
+		return m.inboxKey(s)
 	}
 	if m.tab == tabIssues {
 		return m.issTabKey(s)
@@ -981,9 +1046,35 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 	case "list":
 		m.focus = 0
 	case "preview":
-		if m.tab == tabRepos || m.tab == tabActions || m.tab == tabIssues || m.tab == tabPRs {
+		if m.tab != tabRepos || m.ex != nil || m.selected() != nil {
 			m.focus = 1
 		}
+	case "homerow":
+		m.focus = 0
+		double := z.idx == m.lastIdx && time.Since(m.lastClick) < 400*time.Millisecond
+		m.lastIdx, m.lastClick = z.idx, time.Now()
+		m.home.cur = z.idx
+		if double {
+			m.lastIdx = -1
+			return m.homeOpen()
+		}
+	case "notifrow":
+		m.focus = 0
+		double := z.idx == m.lastIdx && time.Since(m.lastClick) < 400*time.Millisecond
+		m.lastIdx, m.lastClick = z.idx, time.Now()
+		var cmd tea.Cmd
+		if z.idx != m.inbox.cur {
+			m.inbox.cur = z.idx
+			cmd = m.inboxSelected()
+		}
+		if double {
+			m.lastIdx = -1
+			return tea.Batch(cmd, m.inboxOpen())
+		}
+		return cmd
+	case "inboxall":
+		m.inbox.all, m.inbox.cur, m.inbox.off = z.idx == 1, 0, 0
+		return m.inboxSelected()
 	case "prrow":
 		m.focus = 0
 		double := z.idx == m.lastIdx && time.Since(m.lastClick) < 400*time.Millisecond
@@ -1080,6 +1171,10 @@ func (m *model) wheel(ms tea.Mouse) tea.Cmd {
 		return m.actMove(d)
 	case "issrow":
 		return m.issMove(d)
+	case "homerow":
+		return m.homeMove(d)
+	case "notifrow":
+		return m.inboxMove(d)
 	case "prrow":
 		return m.prMove(d)
 	case "row", "list":
@@ -1088,6 +1183,12 @@ func (m *model) wheel(ms tea.Mouse) tea.Cmd {
 		}
 		if m.tab == tabIssues {
 			return m.issMove(d)
+		}
+		if m.tab == tabHome {
+			return m.homeMove(d)
+		}
+		if m.tab == tabInbox {
+			return m.inboxMove(d)
 		}
 		if m.tab == tabPRs {
 			return m.prMove(d)
@@ -1196,6 +1297,21 @@ func (m *model) actClone(then string) tea.Cmd {
 }
 
 func (m *model) buttons() []button {
+	switch m.tab {
+	case tabHome:
+		return []button{{icRead + " Open", "enter", "homeopen"}, {icGlobe + " Browser", "o", "browser"}, {icRefresh + " Refresh", "r", "refresh"}}
+	case tabInbox:
+		b := []button{}
+		if m.selNotif() != nil {
+			b = append(b, button{icRead + " Read", "enter", "inboxopen"}, button{icCheck + " Mark read", "m", "inboxread"}, button{icClose + " Unsubscribe", "x", "inboxunsub"})
+		}
+		shown := "Show all"
+		if m.inbox.all {
+			shown = "Show unread"
+		}
+		return append(b, button{icCheck + " Mark all read", "M", "inboxallread"}, button{shown, "a", "inboxtoggle"},
+			button{icGlobe + " Browser", "o", "browser"}, button{icRefresh + " Refresh", "r", "refresh"})
+	}
 	if b := m.chButtons(); b != nil {
 		return b
 	}
@@ -1238,6 +1354,18 @@ func (m *model) runButton(i int) tea.Cmd {
 		return nil
 	}
 	switch b[i].id {
+	case "homeopen":
+		return m.homeOpen()
+	case "inboxopen":
+		return m.inboxOpen()
+	case "inboxread":
+		return m.inboxKey("m")
+	case "inboxunsub":
+		return m.inboxKey("x")
+	case "inboxallread":
+		return m.inboxKey("M")
+	case "inboxtoggle":
+		return m.inboxKey("a")
 	case "prread":
 		return m.prRead()
 	case "prmerge":
@@ -1325,6 +1453,12 @@ func (m *model) runButton(i int) tea.Cmd {
 		}
 		if m.tab == tabIssues {
 			return m.issTabKey("r")
+		}
+		if m.tab == tabHome {
+			return m.homeKey("r")
+		}
+		if m.tab == tabInbox {
+			return m.inboxKey("r")
 		}
 		if m.tab == tabPRs {
 			return m.prTabKey("r")
@@ -1481,6 +1615,10 @@ func (m *model) render() string {
 	} else {
 		if m.tab == tabActions {
 			left = m.actListBox(lw, ph, 2)
+		} else if m.tab == tabHome {
+			left = m.homeListBox(lw, ph, 2)
+		} else if m.tab == tabInbox {
+			left = m.inboxListBox(lw, ph, 2)
 		} else if m.tab == tabIssues {
 			left = m.issListBox(lw, ph, 2)
 		} else if m.tab == tabPRs {
@@ -1507,6 +1645,9 @@ func (m *model) tabsBar() string {
 	x := 1
 	for i, t := range tabs {
 		label := " " + t.icon + " " + t.name + " "
+		if i == tabInbox && m.unread > 0 {
+			label = " " + t.icon + " " + t.name + " " + fmt.Sprint(m.unread) + " "
+		}
 		var s string
 		switch {
 		case i == m.tab:
@@ -1541,6 +1682,15 @@ func (m *model) pathBar() string {
 		out = m.exPathBar()
 		if m.help {
 			out += sep + fg(cTxt).Render("Keys")
+		}
+	} else if m.tab == tabInbox {
+		which := "Unread"
+		if m.inbox.all {
+			which = "All"
+		}
+		out += sep + fg(cHint).Render(which)
+		if n := m.selNotif(); n != nil {
+			out += sep + fg(cTxt).Render(n.Repository.FullName)
 		}
 	} else if m.tab == tabPRs {
 		out += sep + fg(cHint).Render(prScopes[m.prs.scope])
@@ -1694,6 +1844,10 @@ func (m *model) previewBox(w, h, x0, y0 int) []string {
 		title, lines = m.actPreview(inner)
 	case m.tab == tabIssues:
 		title, lines = m.issPreview(inner)
+	case m.tab == tabHome:
+		title, lines = m.homePreview(inner)
+	case m.tab == tabInbox:
+		title, lines = m.inboxPreview(inner)
 	case m.tab == tabPRs:
 		title, lines = m.prPanel(inner, x0)
 	case m.tab != tabRepos:
@@ -2007,6 +2161,16 @@ func helpLines(w int) []string {
 		row("x", "resolve / unresolve a comment on code"),
 		row("+", "react 👍 ❤️ 🎉 …"),
 		row("enter", "jump to that file in the Files view"),
+		"",
+		sec("Home (1)"),
+		row("j/k  enter", "what needs you: failing CI, reviews, your PRs, assigned issues, repos to push / pull"),
+		row("", "the right side: your contribution graph, numbers and recent activity"),
+		"",
+		sec("Inbox (6)"),
+		row("enter", "read it here (an issue or PR conversation); it gets marked read"),
+		row("m  M", "mark read / mark all read"),
+		row("x", "unsubscribe: no more notifications for it"),
+		row("a", "unread / all"),
 		"",
 		sec("Pull requests — the PRs tab, or a repo's PRs section"),
 		row("[  ]", "views: Overview, Commits, Checks, Files (or click them)"),

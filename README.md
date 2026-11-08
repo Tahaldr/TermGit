@@ -16,8 +16,8 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | 7 | Local Git 1: Changes (stage, commit, amend, pull, push, fetch) + PR Comments (reply, resolve, react) | done |
 | 8 | Local Git 2: branches, stash, graph, cherry-pick, revert, reset, tags, line staging | done |
 | 9 | Local Git 3: conflicts, interactive rebase, remotes, worktrees | done |
-| 10 | Home + Inbox | next |
-| 11 | Explore + repo management | |
+| 10 | Home + Inbox: what needs you, contribution graph, activity, notifications | done |
+| 11 | Explore + repo management | next |
 | 12 | Polish: settings, help page, tests | |
 
 TermGit aims to do everything lazygit does; lazygit stays one key away (`L`).
@@ -42,6 +42,11 @@ TermGit aims to do everything lazygit does; lazygit stays one key away (`L`).
 | `v` | read full screen (README, file, commit) |
 | `esc` | back |
 | `q` | quit |
+
+## Home and Inbox
+
+- **Home** (`1`): on the left, what needs you: failing CI, reviews asked of you, your open PRs, issues assigned to you, repos on this PC with changes to commit / push / pull, unread notifications. `enter` goes straight there. On the right: your contribution graph, numbers and recent activity.
+- **Inbox** (`6`, the tab shows the unread count): your notifications. `enter` reads an issue / PR conversation inside TermGit and marks it read, `m` mark read, `M` mark all read, `x` unsubscribe, `a` unread / all. Checked every minute.
 
 ## Changes (local Git)
 
