@@ -30,6 +30,7 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | `[` / `]` | inside a repo: Code, Commits, Branches |
 | `esc` / `h` / backspace | back: up a folder, then to the repo list |
 | `e` / `L` | open in Nvim / lazygit (asks to clone first if needed) |
+| `P` | pull: bring GitHub's new commits into your copy (fast-forward only, never merges) |
 | `/` | filter repos; inside a repo: find a file, commit or branch |
 | `ctrl+d` / `ctrl+u` | scroll the right panel |
 | `o` / `y` / `c` / `r` | browser / copy link (of what's on screen) / clone / refresh |
@@ -41,6 +42,7 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 
 - **PRs tab** (`4`): PRs in your repos. `f` switches Your repos / Review requests / Created / Involved, `s` open / closed+merged.
 - Inside a repo: the **PRs** section.
+- Overview shows the whole conversation: comments, reviews, and comments left on lines of code (with that code).
 - Views on the right: Overview, Commits, Checks, Files: `[` / `]` (in a repo `{` / `}`), or click them.
 - `enter` shows the view full screen (Files: every file is a heading; Checks: the failing check's logs).
 - `m` merge (squash / merge commit / rebase, keep or delete the branch), `R` review, `C` comment, `x` close / reopen, `K` check out locally, `N` new PR.

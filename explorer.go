@@ -474,6 +474,8 @@ func (m *model) exKey(s string) tea.Cmd {
 		return m.actOpen("nvim")
 	case "L":
 		return m.actOpen("lazygit")
+	case "P":
+		return m.actPull()
 	case "v":
 		return m.actRead()
 	case "enter", "l", "right":
@@ -1121,7 +1123,11 @@ func (m *model) localLine(r *Repo, w int) []string {
 		parts = append(parts, fg(cGreen).Render(icCheck+" in sync with GitHub"))
 		return wrapJoin(parts, "   ", w)
 	}
-	return append(wrapJoin(parts, "   ", w), hints([][2]string{{"L", "lazygit to commit, push or pull"}}))
+	h := [][2]string{{"L", "lazygit to commit or push"}}
+	if li.behind > 0 || li.missing {
+		h = [][2]string{{"P", "pull"}, {"L", "lazygit"}}
+	}
+	return append(wrapJoin(parts, "   ", w), hints(h))
 }
 
 func plural(n int, one, many string) string {
@@ -1129,4 +1135,82 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// ---- pull ----
+
+type pulledMsg struct {
+	name string
+	out  string
+	err  error
+}
+
+// P: git pull --ff-only in your copy on this PC (never merges or rewrites anything)
+func (m *model) actPull() tea.Cmd {
+	r := m.curRepo()
+	if r == nil {
+		return nil
+	}
+	dir := m.localPath(r)
+	if dir == "" {
+		return m.setStatus(r.Name+" isn't on this PC: press c to clone it", true)
+	}
+	li := m.linfo[strings.ToLower(r.NameWithOwner)]
+	what := "Pull from GitHub into " + r.Name
+	switch {
+	case li.behind > 0:
+		what = fmt.Sprintf("Pull %d new %s into %s", li.behind, plural(li.behind, "commit", "commits"), r.Name)
+	case li.missing:
+		what = "Pull the new commits into " + r.Name
+	}
+	if li.branch != "" {
+		what += " (" + li.branch + ")"
+	}
+	name := r.Name
+	m.prompt = &prompt{label: what + "?", confirm: true, done: func(m *model, _ string) tea.Cmd {
+		if m.dump {
+			return m.setStatus("Would run git pull --ff-only in "+dir, false)
+		}
+		return tea.Batch(m.setStatus("Pulling…", false), func() tea.Msg {
+			c := exec.Command("git", "-C", dir, "pull", "--ff-only")
+			c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0") // never hang on a password prompt
+			out, err := c.CombinedOutput()
+			return pulledMsg{name, string(out), err}
+		})
+	}}
+	return nil
+}
+
+func (m *model) onPulled(msg pulledMsg) tea.Cmd {
+	scan := m.scanLocalInfo()
+	out := strings.TrimSpace(msg.out)
+	if msg.err != nil {
+		why := lastLine(out)
+		switch {
+		case strings.Contains(out, "would be overwritten"):
+			why = "your uncommitted changes touch the same files: commit or stash them first (L)"
+		case strings.Contains(out, "Not possible to fast-forward") || strings.Contains(out, "diverging"):
+			why = "you have commits GitHub doesn't: pull in lazygit to combine them (L, then p)"
+		case strings.Contains(out, "no tracking information"):
+			why = "this branch isn't linked to GitHub: push it once in lazygit (L, then P)"
+		case strings.Contains(out, "Authentication") || strings.Contains(out, "terminal prompts disabled"):
+			why = "git needs your login: pull once in lazygit or a terminal"
+		}
+		return tea.Batch(scan, m.setStatus("Couldn't pull "+msg.name+": "+why, true))
+	}
+	if strings.Contains(out, "Already up to date") {
+		return tea.Batch(scan, m.setStatus(msg.name+" was already up to date", false))
+	}
+	sum := "done"
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "changed") && (strings.Contains(l, "file") || strings.Contains(l, "insertion")) {
+			sum = strings.TrimSpace(l)
+		}
+	}
+	return tea.Batch(scan, m.setStatus("Pulled "+msg.name+": "+sum, false))
+}
+
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }

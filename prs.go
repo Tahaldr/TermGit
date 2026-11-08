@@ -109,9 +109,28 @@ func (c *Check) title() string {
 	return n
 }
 
+// a conversation on a line of code (left in a review)
+type ReviewThread struct {
+	Path       string `json:"path"`
+	Line       int    `json:"line"`
+	IsResolved bool   `json:"isResolved"`
+	IsOutdated bool   `json:"isOutdated"`
+	Comments   struct {
+		Nodes []struct {
+			Author *struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			Body     string    `json:"body"`
+			Created  time.Time `json:"createdAt"`
+			DiffHunk string    `json:"diffHunk"`
+		} `json:"nodes"`
+	} `json:"comments"`
+}
+
 type prDetail struct {
 	comments []IssueComment
 	reviews  []PRReview
+	threads  []ReviewThread
 	commits  []Commit
 	checks   []Check
 	err      string
@@ -167,6 +186,7 @@ const prDetailQuery = `query($owner: String!, $name: String!, $n: Int!) {
     pullRequest(number: $n) {
       comments(first: 100) { nodes { author { login } body createdAt } }
       reviews(last: 50) { nodes { author { login } state body submittedAt } }
+      reviewThreads(first: 60) { nodes { path line isResolved isOutdated comments(first: 30) { nodes { author { login } body createdAt diffHunk } } } }
       commits(first: 100) { nodes { commit { oid abbreviatedOid messageHeadline messageBody committedDate additions deletions changedFilesIfAvailable author { name user { login } } } } }
       last: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 80) { nodes {
         __typename
@@ -186,9 +206,10 @@ func fetchPRDetail(nwo string, n int) func() func(*model) {
 			var r struct {
 				Repository struct {
 					PullRequest *struct {
-						Comments struct{ Nodes []IssueComment }
-						Reviews  struct{ Nodes []PRReview }
-						Commits  struct {
+						Comments      struct{ Nodes []IssueComment }
+						Reviews       struct{ Nodes []PRReview }
+						ReviewThreads struct{ Nodes []ReviewThread }
+						Commits       struct {
 							Nodes []struct{ Commit Commit }
 						}
 						Last struct {
@@ -205,7 +226,7 @@ func fetchPRDetail(nwo string, n int) func() func(*model) {
 			}
 			if err = c.Do(prDetailQuery, map[string]interface{}{"owner": owner, "name": name, "n": n}, &r); err == nil && r.Repository.PullRequest != nil {
 				p := r.Repository.PullRequest
-				d.comments, d.reviews = p.Comments.Nodes, p.Reviews.Nodes
+				d.comments, d.reviews, d.threads = p.Comments.Nodes, p.Reviews.Nodes, p.ReviewThreads.Nodes
 				for _, c := range p.Commits.Nodes {
 					d.commits = append(d.commits, c.Commit)
 				}
@@ -824,6 +845,43 @@ func prConversationMD(p *PR, d *prDetail) string {
 			}
 			msgs = append(msgs, msg{r.Submitted, fmt.Sprintf("%s %s · %s ago", who, what, ago(r.Submitted)), strings.TrimSpace(r.Body)})
 		}
+		// comments on lines of code: the code they're about, then the replies
+		for _, t := range d.threads {
+			if len(t.Comments.Nodes) == 0 {
+				continue
+			}
+			first := t.Comments.Nodes[0]
+			who := "ghost"
+			if first.Author != nil {
+				who = first.Author.Login
+			}
+			where := t.Path
+			if t.Line > 0 {
+				where += fmt.Sprintf(":%d", t.Line)
+			}
+			state := ""
+			switch {
+			case t.IsResolved:
+				state = " · ✓ resolved"
+			case t.IsOutdated:
+				state = " · outdated"
+			}
+			var b strings.Builder
+			if hunk := lastLines(first.DiffHunk, 6); hunk != "" {
+				b.WriteString("```diff\n" + hunk + "\n```\n\n")
+			}
+			for i, c := range t.Comments.Nodes {
+				name := "ghost"
+				if c.Author != nil {
+					name = c.Author.Login
+				}
+				if i > 0 {
+					b.WriteString(fmt.Sprintf("**%s** · %s ago\n\n", name, ago(c.Created)))
+				}
+				b.WriteString(strings.TrimSpace(c.Body) + "\n\n")
+			}
+			msgs = append(msgs, msg{first.Created, fmt.Sprintf("%s on %s · %s ago%s", who, where, ago(first.Created), state), strings.TrimSpace(b.String())})
+		}
 	}
 	sort.SliceStable(msgs, func(i, j int) bool { return msgs[i].at.Before(msgs[j].at) })
 	var b strings.Builder
@@ -1152,4 +1210,13 @@ func (m *model) prButtons() []button {
 	}
 	return append(b, button{icPR + " New", "N", "prnew"}, button{"Show " + shown, "s", "prstate"},
 		button{icGlobe + " Browser", "o", "browser"}, button{icRefresh + " Refresh", "r", "refresh"})
+}
+
+// lastLines keeps the last n lines (the code right around a review comment)
+func lastLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }

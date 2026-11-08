@@ -435,6 +435,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.status = ""
 		return m, m.actLogsFor(msg.run)
+	case pulledMsg:
+		return m, m.onPulled(msg)
 	case checkoutMsg:
 		cmd := m.scanLocalInfo()
 		if msg.err != nil {
@@ -831,6 +833,8 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		return m.actOpen("nvim")
 	case "L":
 		return m.actOpen("lazygit")
+	case "P":
+		return m.actPull()
 	case "v":
 		return m.actRead()
 	case "/":
@@ -1175,6 +1179,8 @@ func (m *model) buttons() []button {
 		button{icGlobe + " Browser", "o", "browser"}, button{icLink + " Copy link", "y", "copy"})
 	if m.localPath(r) == "" {
 		b = append(b, button{icDown + " Clone", "c", "clone"})
+	} else if li := m.linfo[strings.ToLower(r.NameWithOwner)]; li.behind > 0 || li.missing {
+		b = append(b, button{icDown + " Pull", "P", "pull"})
 	}
 	b = append(b, button{icRefresh + " Refresh", "r", "refresh"})
 	return b
@@ -1236,6 +1242,8 @@ func (m *model) runButton(i int) tea.Cmd {
 		return m.actOpen("nvim")
 	case "lazygit":
 		return m.actOpen("lazygit")
+	case "pull":
+		return m.actPull()
 	case "browser":
 		return m.actBrowser()
 	case "copy":
@@ -1300,6 +1308,7 @@ func (m *model) commands() []command {
 		command{"Read full screen", "v", func(m *model) tea.Cmd { return m.actRead() }},
 		command{"Open in Nvim", "e", func(m *model) tea.Cmd { return m.actOpen("nvim") }},
 		command{"Open in lazygit", "L", func(m *model) tea.Cmd { return m.actOpen("lazygit") }},
+		command{"Pull from GitHub", "P", func(m *model) tea.Cmd { return m.actPull() }},
 		command{"Open in browser", "o", func(m *model) tea.Cmd { return m.actBrowser() }},
 		command{"Copy link", "y", func(m *model) tea.Cmd { return m.actCopy() }},
 		command{"Clone repo", "c", func(m *model) tea.Cmd { return m.actClone("") }},
@@ -1884,6 +1893,7 @@ func helpLines(w int) []string {
 		sec("Selected repo / file"),
 		row("e", "open in Nvim (the highlighted file if it's on this PC)"),
 		row("L", "open lazygit: commit, push, pull"),
+		row("P", "pull: get the new commits from GitHub into your copy"),
 		row("o", "open what you see in the browser"),
 		row("y", "copy its link"),
 		row("c", "clone into "+cloneRoot),
