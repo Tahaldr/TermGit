@@ -26,7 +26,10 @@ type Repo struct {
 	PushedAt         time.Time `json:"pushedAt"`
 	URL              string    `json:"url"`
 	DefaultBranchRef *struct {
-		Name string `json:"name"`
+		Name   string `json:"name"`
+		Target *struct {
+			Oid string `json:"oid"`
+		} `json:"target"`
 	} `json:"defaultBranchRef"`
 	PrimaryLanguage *struct {
 		Name  string `json:"name"`
@@ -37,6 +40,14 @@ type Repo struct {
 func (r Repo) Branch() string {
 	if r.DefaultBranchRef != nil {
 		return r.DefaultBranchRef.Name
+	}
+	return ""
+}
+
+// HeadOid is the newest commit on the default branch on GitHub
+func (r Repo) HeadOid() string {
+	if r.DefaultBranchRef != nil && r.DefaultBranchRef.Target != nil {
+		return r.DefaultBranchRef.Target.Oid
 	}
 	return ""
 }
@@ -71,7 +82,7 @@ const reposQuery = `query($after: String) {
       pageInfo { hasNextPage endCursor }
       nodes {
         nameWithOwner name description isPrivate isFork isArchived stargazerCount forkCount pushedAt url
-        defaultBranchRef { name }
+        defaultBranchRef { name target { oid } }
         primaryLanguage { name color }
       }
     }

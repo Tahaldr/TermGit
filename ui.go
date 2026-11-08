@@ -63,6 +63,7 @@ type readmeTick struct {
 type statusClear struct{ seq int }
 type clonedMsg struct {
 	nwo, dest string
+	then      string // app to open after cloning ("" = none)
 	err       error
 }
 
@@ -107,6 +108,21 @@ type model struct {
 	zones     []zone
 	lastClick time.Time
 	lastIdx   int
+
+	// repo explorer (batch 2)
+	ex       *explorer
+	exSaved  map[string]*explorer
+	linfo    map[string]localInfo
+	loaded   map[string]bool
+	inflight map[string]bool
+	pending  map[string]tea.Cmd
+	loadSeq  int
+	trees    map[string]*treeData
+	blobs    map[string]*blobData
+	clists   map[string]*commitList
+	cdetail  map[string]*commitDetail
+	blists   map[string]*branchList
+	lines    map[string][]string
 }
 
 func newModel() *model {
@@ -114,6 +130,10 @@ func newModel() *model {
 		tab: tabRepos, readme: map[string]readmeEntry{}, readmeErr: map[string]string{},
 		fresh: map[string]bool{}, fetching: map[string]bool{}, mdCache: map[string][]string{}, mdWidth: map[string]int{},
 		local: scanLocal(localRoots), lastIdx: -1,
+		exSaved: map[string]*explorer{}, linfo: map[string]localInfo{}, loaded: map[string]bool{},
+		inflight: map[string]bool{}, pending: map[string]tea.Cmd{}, trees: map[string]*treeData{},
+		blobs: map[string]*blobData{}, clists: map[string]*commitList{}, cdetail: map[string]*commitDetail{},
+		blists: map[string]*branchList{}, lines: map[string][]string{},
 	}
 	var c reposCache
 	if loadCache("repos.json", &c) {
@@ -125,7 +145,7 @@ func newModel() *model {
 
 func (m *model) Init() tea.Cmd {
 	m.loading = true
-	return tea.Batch(fetchRepos(), m.onSelect())
+	return tea.Batch(fetchRepos(), m.onSelect(), m.scanLocalInfo())
 }
 
 // ---------------------------------------------------------------------------
@@ -308,10 +328,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cur = i
 			}
 		}
-		if r := m.selected(); r != nil && r.NameWithOwner != keep {
-			return m, m.onSelect()
+		for _, r := range m.repos {
+			if m.ex != nil && r.NameWithOwner == m.ex.repo.NameWithOwner {
+				m.ex.repo = r
+			}
 		}
-		return m, m.onSelect()
+		return m, tea.Batch(m.onSelect(), m.scanLocalInfo())
 	case readmeTick:
 		if msg.seq == m.fetchSeq && !m.fetching[msg.nwo] {
 			m.fetching[msg.nwo] = true
@@ -335,7 +357,37 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, m.setStatus("Clone failed: "+msg.err.Error(), true)
 		}
-		return m, m.setStatus("Cloned into "+msg.dest, false)
+		st := m.setStatus("Cloned into "+msg.dest, false)
+		if msg.then != "" {
+			return m, tea.Batch(st, m.scanLocalInfo(), m.runApp(msg.then, msg.dest))
+		}
+		return m, tea.Batch(st, m.scanLocalInfo())
+	case appDoneMsg:
+		cmd := m.scanLocalInfo()
+		if msg.err != nil {
+			return m, tea.Batch(cmd, m.setStatus(appName(msg.app)+" stopped: "+msg.err.Error(), true))
+		}
+		return m, cmd
+	case localMsg:
+		m.linfo = msg
+	case loadTick:
+		if msg.seq == m.loadSeq {
+			if run, ok := m.pending[msg.key]; ok {
+				delete(m.pending, msg.key)
+				if !m.loaded[msg.key] && !m.inflight[msg.key] {
+					m.inflight[msg.key] = true
+					return m, run
+				}
+			}
+		}
+	case loadedMsg:
+		m.inflight[msg.key] = false
+		m.loaded[msg.key] = true
+		msg.apply(m)
+		if m.exActive() != nil {
+			m.exClamp()
+			return m, m.exLoad()
+		}
 	case tea.KeyPressMsg:
 		return m, m.key(msg)
 	case tea.MouseClickMsg:
@@ -380,6 +432,9 @@ func (m *model) setTab(i int) tea.Cmd {
 	}
 	m.tab, m.focus, m.help, m.pvOff = i, 0, false, 0
 	if i == tabRepos {
+		if m.ex != nil {
+			return m.exSelected()
+		}
 		return m.onSelect()
 	}
 	return nil
@@ -461,6 +516,26 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	// typing a search inside a repo
+	if ex := m.exActive(); ex != nil && ex.filtering {
+		switch s {
+		case "esc":
+			return m.exBack()
+		case "enter":
+			ex.filtering = false
+			return m.exActivate()
+		case "down", "ctrl+n", "ctrl+j":
+			return m.exMove(1)
+		case "up", "ctrl+k":
+			return m.exMove(-1)
+		}
+		if editText(&ex.query[ex.sec], k) {
+			ex.cur[ex.sec], ex.off[ex.sec] = 0, 0
+			return m.exSelected()
+		}
+		return nil
+	}
+
 	// typing a filter
 	if m.filtering {
 		switch s {
@@ -502,6 +577,8 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		switch {
 		case m.help:
 			m.help = false
+		case m.exActive() != nil:
+			return m.exBack()
 		case m.focus == 1:
 			m.focus = 0
 		case m.filter != "":
@@ -520,6 +597,9 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 	if m.tab != tabRepos {
 		return nil
 	}
+	if m.ex != nil {
+		return m.exKey(s)
+	}
 	switch s {
 	case "tab", "shift+tab":
 		m.focus = 1 - m.focus
@@ -528,9 +608,13 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 	case "right", "l":
 		m.focus = 1
 	case "enter":
-		if m.focus == 0 && m.selected() != nil {
-			m.focus = 1
+		if m.focus == 0 {
+			return m.openRepo()
 		}
+	case "e":
+		return m.actOpen("nvim")
+	case "L":
+		return m.actOpen("lazygit")
 	case "/":
 		m.filtering, m.focus = true, 0
 	case "r":
@@ -540,7 +624,7 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 	case "y":
 		return m.actCopy()
 	case "c":
-		return m.actClone()
+		return m.actClone("")
 	case "j", "down":
 		if m.focus == 0 {
 			return m.move(1)
@@ -600,6 +684,34 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 		return m.setTab(z.idx)
 	case "crumb":
 		m.focus, m.help = 0, false
+		if m.exActive() != nil {
+			return m.leaveRepo()
+		}
+	case "crumb-repo":
+		m.ex.dir = ""
+		m.ex.query[secCode] = ""
+		return m.exSetSec(secCode)
+	case "crumb-branch":
+		return m.exSetSec(secBranches)
+	case "crumb-sec":
+		m.focus = 0
+	case "crumb-dir":
+		segs := strings.Split(m.ex.dir, "/")
+		return m.exGoDir(strings.Join(segs[:z.idx+1], "/"))
+	case "sec":
+		return m.exSetSec(z.idx)
+	case "exrow":
+		m.focus = 0
+		double := z.idx == m.lastIdx && time.Since(m.lastClick) < 400*time.Millisecond
+		m.lastIdx, m.lastClick = z.idx, time.Now()
+		if double {
+			m.lastIdx = -1
+			return m.exActivate()
+		}
+		if z.idx != m.ex.cur[m.ex.sec] {
+			m.ex.cur[m.ex.sec] = z.idx
+			return m.exSelected()
+		}
 	case "row":
 		m.focus = 0
 		double := z.idx == m.lastIdx && time.Since(m.lastClick) < 400*time.Millisecond
@@ -610,7 +722,8 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 			cmd = m.onSelect()
 		}
 		if double {
-			m.focus = 1
+			m.lastIdx = -1
+			return tea.Batch(cmd, m.openRepo())
 		}
 		return cmd
 	case "list":
@@ -650,7 +763,12 @@ func (m *model) wheel(ms tea.Mouse) tea.Cmd {
 		return nil
 	}
 	switch z.id {
+	case "exrow":
+		return m.exMove(d)
 	case "row", "list":
+		if m.exActive() != nil {
+			return m.exMove(d)
+		}
 		return m.move(d)
 	case "preview":
 		m.scroll(d * 3)
@@ -679,33 +797,41 @@ func (m *model) refresh() tea.Cmd {
 		cmds = append(cmds, fetchReadme(r.NameWithOwner))
 	}
 	m.local = scanLocal(localRoots)
+	cmds = append(cmds, m.scanLocalInfo())
 	return tea.Batch(cmds...)
 }
 
 func (m *model) actBrowser() tea.Cmd {
-	r := m.selected()
-	if r == nil {
+	u := m.curURL()
+	if u == "" {
 		return nil
 	}
-	if err := browser.New("", io.Discard, io.Discard).Browse(r.URL); err != nil {
+	if m.dump {
+		return m.setStatus("Would open "+u, false)
+	}
+	if err := browser.New("", io.Discard, io.Discard).Browse(u); err != nil {
 		return m.setStatus("Couldn't open the browser: "+err.Error(), true)
 	}
-	return m.setStatus("Opened "+r.Name+" in the browser", false)
+	return m.setStatus("Opened in the browser", false)
 }
 
 func (m *model) actCopy() tea.Cmd {
-	r := m.selected()
-	if r == nil {
+	u := m.curURL()
+	if u == "" {
 		return nil
 	}
-	if err := clipboard.WriteAll(r.URL); err != nil {
+	if m.dump {
+		return m.setStatus("Would copy "+u, false)
+	}
+	if err := clipboard.WriteAll(u); err != nil {
 		return m.setStatus("Couldn't copy: "+err.Error(), true)
 	}
-	return m.setStatus("Copied "+r.URL, false)
+	return m.setStatus("Copied "+u, false)
 }
 
-func (m *model) actClone() tea.Cmd {
-	r := m.selected()
+// actClone asks to clone the repo; then = app to open right after ("" = none)
+func (m *model) actClone(then string) tea.Cmd {
+	r := m.curRepo()
 	if r == nil {
 		return nil
 	}
@@ -717,23 +843,32 @@ func (m *model) actClone() tea.Cmd {
 		return m.setStatus("A folder named "+r.Name+" already exists in "+cloneRoot, true)
 	}
 	nwo := r.NameWithOwner
+	label := "Clone " + nwo + " into " + dest + "?"
+	if then != "" {
+		label = nwo + " isn't on this PC. Clone it into " + dest + " and open " + appName(then) + "?"
+	}
 	m.prompt = &prompt{
-		label:   "Clone " + nwo + " into " + dest + "?",
+		label:   label,
 		confirm: true,
 		done: func(m *model, _ string) tea.Cmd {
 			c := exec.Command("gh", "repo", "clone", nwo, dest)
-			return tea.ExecProcess(c, func(err error) tea.Msg { return clonedMsg{nwo, dest, err} })
+			return tea.ExecProcess(c, func(err error) tea.Msg { return clonedMsg{nwo, dest, then, err} })
 		},
 	}
 	return nil
 }
 
 func (m *model) buttons() []button {
-	r := m.selected()
+	r := m.curRepo()
 	if r == nil {
 		return nil
 	}
-	b := []button{{icGlobe + " Browser", "o", "browser"}, {icLink + " Copy link", "y", "copy"}}
+	var b []button
+	if m.exActive() == nil {
+		b = append(b, button{icRepo + " Open", "enter", "open"})
+	}
+	b = append(b, button{icNvim + " Nvim", "e", "nvim"}, button{icGit + " lazygit", "L", "lazygit"},
+		button{icGlobe + " Browser", "o", "browser"}, button{icLink + " Copy link", "y", "copy"})
 	if m.localPath(r) == "" {
 		b = append(b, button{icDown + " Clone", "c", "clone"})
 	}
@@ -747,13 +882,22 @@ func (m *model) runButton(i int) tea.Cmd {
 		return nil
 	}
 	switch b[i].id {
+	case "open":
+		return m.openRepo()
+	case "nvim":
+		return m.actOpen("nvim")
+	case "lazygit":
+		return m.actOpen("lazygit")
 	case "browser":
 		return m.actBrowser()
 	case "copy":
 		return m.actCopy()
 	case "clone":
-		return m.actClone()
+		return m.actClone("")
 	case "refresh":
+		if m.exActive() != nil {
+			return m.exRefresh()
+		}
 		return m.refresh()
 	}
 	return nil
@@ -770,11 +914,43 @@ func (m *model) commands() []command {
 		cs = append(cs, command{name, strconv.Itoa(i + 1), func(m *model) tea.Cmd { return m.setTab(i) }})
 	}
 	cs = append(cs,
-		command{"Filter repos", "/", func(m *model) tea.Cmd { m.setTab(tabRepos); m.filtering = true; return nil }},
-		command{"Open repo in browser", "o", func(m *model) tea.Cmd { return m.actBrowser() }},
-		command{"Copy repo link", "y", func(m *model) tea.Cmd { return m.actCopy() }},
-		command{"Clone repo", "c", func(m *model) tea.Cmd { return m.actClone() }},
-		command{"Refresh", "r", func(m *model) tea.Cmd { return m.refresh() }},
+		command{"Filter repos", "/", func(m *model) tea.Cmd {
+			m.setTab(tabRepos)
+			if m.ex != nil {
+				m.leaveRepo()
+			}
+			m.filtering = true
+			return nil
+		}},
+		command{"Open repo (code, commits, branches)", "enter", func(m *model) tea.Cmd {
+			if m.tab != tabRepos || m.ex != nil {
+				return nil
+			}
+			return m.openRepo()
+		}},
+	)
+	if m.exActive() != nil {
+		for i, n := range secNames {
+			i := i
+			cs = append(cs, command{"Show " + strings.ToLower(n), "[ ]", func(m *model) tea.Cmd { return m.exSetSec(i) }})
+		}
+		cs = append(cs,
+			command{"Find a file", "/", func(m *model) tea.Cmd { m.exSetSec(secCode); m.ex.filtering = true; return nil }},
+			command{"Back to the repo list", "esc", func(m *model) tea.Cmd { return m.leaveRepo() }},
+		)
+	}
+	cs = append(cs,
+		command{"Open in Nvim", "e", func(m *model) tea.Cmd { return m.actOpen("nvim") }},
+		command{"Open in lazygit", "L", func(m *model) tea.Cmd { return m.actOpen("lazygit") }},
+		command{"Open in browser", "o", func(m *model) tea.Cmd { return m.actBrowser() }},
+		command{"Copy link", "y", func(m *model) tea.Cmd { return m.actCopy() }},
+		command{"Clone repo", "c", func(m *model) tea.Cmd { return m.actClone("") }},
+		command{"Refresh", "r", func(m *model) tea.Cmd {
+			if m.exActive() != nil {
+				return m.exRefresh()
+			}
+			return m.refresh()
+		}},
 		command{"Show all keys", "?", func(m *model) tea.Cmd { m.help = true; m.pvOff = 0; return nil }},
 		command{"Quit", "q", func(m *model) tea.Cmd { return tea.Quit }},
 	)
@@ -808,7 +984,12 @@ func (m *model) render() string {
 	lw, ph := m.layout()
 	pw := m.w - lw
 	lines := []string{m.tabsBar(), m.pathBar()}
-	left := m.listBox(lw, ph, 2)
+	var left []string
+	if m.exActive() != nil {
+		left = m.exListBox(lw, ph, 2)
+	} else {
+		left = m.listBox(lw, ph, 2)
+	}
 	right := m.previewBox(pw, ph, lw, 2)
 	for i := 0; i < ph; i++ {
 		lines = append(lines, left[i]+right[i])
@@ -855,7 +1036,12 @@ func (m *model) pathBar() string {
 	root := tabs[m.tab].name
 	out := " " + fg(cHint).Render(root)
 	m.addZone(1, 1, width(root), 1, "crumb", 0)
-	if r := m.selected(); r != nil {
+	if m.exActive() != nil {
+		out = m.exPathBar()
+		if m.help {
+			out += sep + fg(cTxt).Render("Keys")
+		}
+	} else if r := m.selected(); r != nil {
 		out += sep + fg(cTxt).Render(r.NameWithOwner)
 		if m.help {
 			out += sep + fg(cTxt).Render("Keys")
@@ -954,6 +1140,18 @@ func (m *model) repoRow(r *Repo, w int, sel bool) string {
 	right := ""
 	if m.localPath(r) != "" {
 		right += st.Foreground(cGreen).Render(icFolder) + st.Render(" ")
+		li := m.linfo[strings.ToLower(r.NameWithOwner)]
+		if li.dirty > 0 {
+			right += st.Foreground(cOrange).Render("●") + st.Render(" ")
+		}
+		if li.ahead > 0 {
+			right += st.Foreground(cYellow).Render(fmt.Sprintf("↑%d", li.ahead)) + st.Render(" ")
+		}
+		if li.missing {
+			right += st.Foreground(cAcc).Render("↓") + st.Render(" ")
+		} else if li.behind > 0 {
+			right += st.Foreground(cAcc).Render(fmt.Sprintf("↓%d", li.behind)) + st.Render(" ")
+		}
 	}
 	right += st.Foreground(cMut).Render(fmt.Sprintf("%4s", ago(r.PushedAt))) // "3d", "11mo"
 	left := st.Foreground(ic).Render(icon) + st.Render(" ") + st.Foreground(nc).Bold(sel).Render(name)
@@ -984,6 +1182,8 @@ func (m *model) previewBox(w, h, x0, y0 int) []string {
 			"", fg(cMut).Render(fmt.Sprintf("It comes in batch %d of the plan.", t.batch)),
 			fg(cMut).Render("Press 2 (or click Repos) to go back to your repos."),
 		}
+	case m.exActive() != nil:
+		title, lines = m.exPreview(inner)
 	default:
 		if r := m.selected(); r != nil {
 			title = "README"
@@ -1050,6 +1250,7 @@ func (m *model) repoPreview(r *Repo, w int) []string {
 	out = append(out, wrapJoin(meta, "   ", w)...)
 	if p := m.localPath(r); p != "" {
 		out = append(out, fg(cGreen).Render(icFolder+" "+p))
+		out = append(out, m.localLine(r, w)...)
 	} else {
 		out = append(out, fg(cMut).Render(icFolder+" not on this PC  (c to clone)"))
 	}
@@ -1173,10 +1374,14 @@ func (m *model) hintBar(y int) string {
 	switch {
 	case m.tab != tabRepos:
 		h = [][2]string{{"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
+	case m.ex != nil && m.focus == 1:
+		h = [][2]string{{"j/k", "scroll"}, {"ctrl+d/u", "page"}, {"esc", "back"}, {"[ ]", "section"}, {"e", "nvim"}, {"L", "lazygit"}, {"o", "browser"}, {"ctrl+p", "commands"}, {"?", "keys"}}
+	case m.ex != nil:
+		h = [][2]string{{"j/k", "move"}, {"enter", "open"}, {"esc", "back"}, {"[ ]", "section"}, {"/", "find"}, {"e", "nvim"}, {"L", "lazygit"}, {"ctrl+p", "commands"}, {"?", "keys"}}
 	case m.focus == 1:
 		h = [][2]string{{"j/k", "scroll"}, {"ctrl+d/u", "page"}, {"g/G", "top/end"}, {"esc", "back to list"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
 	default:
-		h = [][2]string{{"j/k", "move"}, {"enter", "read"}, {"/", "filter"}, {"tab", "switch panel"}, {"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
+		h = [][2]string{{"j/k", "move"}, {"enter", "open repo"}, {"tab", "README"}, {"/", "filter"}, {"e", "nvim"}, {"L", "lazygit"}, {"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
 	}
 	out := " " + hints(h)
 	// the "?" and "ctrl+p" hints are clickable too
@@ -1211,16 +1416,31 @@ func helpLines(w int) []string {
 		"",
 		sec("Repo list"),
 		row("j/k  ↑/↓", "move (or mouse wheel)"),
-		row("enter", "read the README (or double-click)"),
-		row("tab", "switch between list and README"),
+		row("enter", "open the repo: code, commits, branches (or double-click)"),
+		row("tab  l", "read the README on the right"),
 		row("/", "filter by name, description or language"),
 		row("g / G", "first / last"),
 		"",
-		sec("Selected repo"),
-		row("o", "open in the browser"),
+		sec("Inside a repo"),
+		row("[  ]", "switch section: Code, Commits, Branches (or click them)"),
+		row("enter  l", "open a folder / file / commit; on a branch: browse it"),
+		row("esc  h  ⌫", "back: up a folder, then to the repo list"),
+		row("/", "find a file anywhere in the repo, a commit or a branch"),
+		row("crumbs", "click the path at the top to jump back"),
+		"",
+		sec("Selected repo / file"),
+		row("e", "open in Nvim (the highlighted file if it's on this PC)"),
+		row("L", "open lazygit: commit, push, pull"),
+		row("o", "open what you see in the browser"),
 		row("y", "copy its link"),
-		row("c", "clone into " + cloneRoot),
+		row("c", "clone into "+cloneRoot),
 		row("r", "refresh from GitHub"),
+		"",
+		sec("Badges on repos you have on this PC"),
+		row(icFolder, "cloned here"),
+		row("●", "files changed but not committed"),
+		row("↑2", "2 commits not pushed to GitHub"),
+		row("↓3  ↓", "GitHub has 3 (or some) new commits: pull in lazygit"),
 		"",
 		sec("Mouse"),
 		row("click", "tabs, repos, buttons, commands"),

@@ -51,6 +51,12 @@ const (
 	icCheck   = ""
 	icWarn    = ""
 	icSearch  = ""
+	icCode    = ""
+	icCommit  = ""
+	icFile    = ""
+	icUp      = ""
+	icNvim    = ""
+	icGit     = ""
 )
 
 // ---- string helpers (ANSI-aware) ----
@@ -121,8 +127,8 @@ func box(title string, w, h int, body []string, focus bool, note string) []strin
 // ---- markdown (READMEs) ----
 
 func sp(s string) *string { return &s }
-func up(u uint) *uint    { return &u }
-func bp(b bool) *bool    { return &b }
+func up(u uint) *uint     { return &u }
+func bp(b bool) *bool     { return &b }
 
 func mdStyle() gansi.StyleConfig {
 	s := styles.DarkStyleConfig
