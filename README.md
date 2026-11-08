@@ -10,8 +10,8 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | 1 | Base: layout, tabs, mouse, command palette, bottom-bar prompts, Repos list + README | done |
 | 2 | Repo explorer: code, commits, branches, Nvim, lazygit, local badges | done |
 | 3 | Markdown reader: Nvim-style markdown, full-screen reader, Contents, `termgit file.md` | done |
-| 4 | Actions + Releases | next |
-| 5 | Issues | |
+| 4 | Actions + Releases: CI runs, logs, re-run, cancel, start workflows, releases | done |
+| 5 | Issues | next |
 | 6 | PRs | |
 | 7 | Home + Inbox | |
 | 8 | Explore + repo management | |
@@ -36,6 +36,15 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | `v` | read full screen (README, file, commit) |
 | `esc` | back |
 | `q` | quit |
+
+## Actions and Releases
+
+- **Actions tab** (`5`): CI runs of your recent repos. Running ones first, then the ones still broken, then the rest. `f` switches All / Failed / Running.
+- Inside a repo: the **Actions** and **Releases** sections (`[` / `]`).
+- `enter` on a run opens its logs in the reader: jobs and steps are headings, it opens at the first error.
+- `R` re-run (failed jobs only if it failed), `x` cancel, `w` start a workflow by hand.
+- Running runs update by themselves every 5 seconds.
+- Releases: `enter` reads the notes, `d` downloads files to Downloads, `N` makes a new release (notes written in Nvim or made from the commits).
 
 ## Reader
 

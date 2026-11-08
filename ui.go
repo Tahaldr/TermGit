@@ -23,10 +23,13 @@ type tabInfo struct {
 
 var tabs = []tabInfo{
 	{"Home", icHome, 7}, {"Repos", icRepo, 0}, {"Issues", icIssue, 5}, {"PRs", icPR, 6},
-	{"Actions", icActions, 4}, {"Inbox", icInbox, 7}, {"Explore", icExplore, 8},
+	{"Actions", icActions, 0}, {"Inbox", icInbox, 7}, {"Explore", icExplore, 8},
 }
 
-const tabRepos = 1
+const (
+	tabRepos   = 1
+	tabActions = 4
+)
 
 // a clickable area of the screen, recorded while drawing
 type zone struct {
@@ -41,6 +44,7 @@ type prompt struct {
 	confirm bool // y / n question; otherwise a line of text
 	text    string
 	done    func(m *model, value string) tea.Cmd
+	no      func(m *model) tea.Cmd // y / n question: what "n" does (nothing if nil)
 }
 
 type command struct {
@@ -109,6 +113,15 @@ type model struct {
 	lastClick time.Time
 	lastIdx   int
 
+	// actions + releases (batch 4)
+	act      actState
+	runs     map[string]*runList
+	jobs     map[string]*jobList
+	releases map[string]*releaseList
+	logs     map[string]map[int64]string
+	palItems []command // the palette used as a picker (workflows, files to download)
+	palTitle string
+
 	// reader (batch 3): full screen; solo = started as `termgit file.md`
 	rd   *reader
 	solo bool
@@ -138,7 +151,10 @@ func newModel() *model {
 		inflight: map[string]bool{}, pending: map[string]tea.Cmd{}, trees: map[string]*treeData{},
 		blobs: map[string]*blobData{}, clists: map[string]*commitList{}, cdetail: map[string]*commitDetail{},
 		blists: map[string]*branchList{}, lines: map[string][]string{},
+		runs: map[string]*runList{}, jobs: map[string]*jobList{}, releases: map[string]*releaseList{},
+		logs: map[string]map[int64]string{},
 	}
+	m.loadRuns()
 	var c reposCache
 	if loadCache("repos.json", &c) {
 		m.login, m.repos, m.reposAt = c.Login, c.Repos, c.At
@@ -155,7 +171,11 @@ func (m *model) Init() tea.Cmd {
 		return watch()
 	}
 	m.loading = true
-	return tea.Batch(fetchRepos(), m.onSelect(), m.scanLocalInfo())
+	cmds := []tea.Cmd{fetchRepos(), m.onSelect(), m.scanLocalInfo()}
+	if !m.dump {
+		cmds = append(cmds, live())
+	}
+	return tea.Batch(cmds...)
 }
 
 // ---------------------------------------------------------------------------
@@ -245,7 +265,11 @@ func (m *model) setStatus(s string, isErr bool) tea.Cmd {
 func (m *model) palMatches() []command {
 	q := strings.ToLower(m.palQ)
 	var out []command
-	for _, c := range m.commands() {
+	src := m.palItems
+	if src == nil {
+		src = m.commands()
+	}
+	for _, c := range src {
 		if fuzzy(strings.ToLower(c.name), q) {
 			out = append(out, c)
 		}
@@ -380,6 +404,25 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case localMsg:
 		m.linfo = msg
+	case liveTick:
+		return m, m.onLive()
+	case reloadMsg:
+		return m, m.onReload(msg.key)
+	case ciDoneMsg:
+		return m, m.onCIDone(msg)
+	case workflowsMsg:
+		return m, m.onWorkflows(msg)
+	case logsMsg:
+		if msg.err != nil {
+			return m, m.setStatus("Couldn't load the logs: "+apiErr(msg.err), true)
+		}
+		m.logs[msg.key] = msg.text
+		delete(logDocs, msg.key)
+	case notesDoneMsg:
+		if msg.err != nil {
+			return m, m.setStatus("Nvim stopped: "+msg.err.Error(), true)
+		}
+		return m, m.confirmRelease(msg.nwo, msg.tag, msg.title, msg.target, msg.file)
 	case watchTick:
 		m.rdReload()
 		return m, watch()
@@ -397,6 +440,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inflight[msg.key] = false
 		m.loaded[msg.key] = true
 		msg.apply(m)
+		if m.tab == tabActions && m.rd == nil {
+			return m, m.loadJobs(m.selRun(), true)
+		}
 		if m.exActive() != nil {
 			m.exClamp()
 			return m, m.exLoad()
@@ -450,7 +496,20 @@ func (m *model) setTab(i int) tea.Cmd {
 		}
 		return m.onSelect()
 	}
+	if i == tabActions {
+		return tea.Batch(m.actLoadAll(), m.actSelected())
+	}
 	return nil
+}
+
+// openPicker shows choices in the palette (pick one with enter or a click)
+func (m *model) openPicker(title string, items []command) {
+	m.palette, m.palQ, m.palCur = true, "", 0
+	m.palItems, m.palTitle = items, title
+}
+
+func (m *model) closePal() {
+	m.palette, m.palItems, m.palTitle = false, nil, ""
 }
 
 // text typed into the filter / prompt / palette; returns false when the key isn't text editing
@@ -487,6 +546,9 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 				return p.done(m, "y")
 			case "n", "esc", "q":
 				m.prompt = nil
+				if p.no != nil && strings.ToLower(s) == "n" {
+					return p.no(m)
+				}
 			}
 			return nil
 		}
@@ -512,9 +574,9 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		list := m.palMatches()
 		switch s {
 		case "esc", "ctrl+p":
-			m.palette = false
+			m.closePal()
 		case "enter":
-			m.palette = false
+			m.closePal()
 			if m.palCur < len(list) {
 				return list[m.palCur].run(m)
 			}
@@ -554,6 +616,27 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	// typing a search in the Actions tab
+	if m.tab == tabActions && m.act.filtering {
+		switch s {
+		case "esc":
+			m.act.filtering, m.act.query = false, ""
+			return m.actSelected()
+		case "enter":
+			m.act.filtering = false
+			return nil
+		case "down", "ctrl+n", "ctrl+j":
+			return m.actMove(1)
+		case "up", "ctrl+k":
+			return m.actMove(-1)
+		}
+		if editText(&m.act.query, k) {
+			m.act.cur, m.act.off = 0, 0
+			return m.actSelected()
+		}
+		return nil
+	}
+
 	// typing a filter
 	if m.filtering {
 		switch s {
@@ -582,7 +665,7 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 	case "q":
 		return tea.Quit
 	case "ctrl+p", ":":
-		m.palette, m.palQ, m.palCur = true, "", 0
+		m.openPicker("", nil)
 		return nil
 	case "?":
 		m.help = !m.help
@@ -599,6 +682,13 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 			return m.exBack()
 		case m.focus == 1:
 			m.focus = 0
+		case m.tab == tabActions && m.act.query != "":
+			m.act.query = ""
+			return m.actSelected()
+		case m.tab == tabActions:
+			return nil
+		case m.focus == 1:
+			m.focus = 0
 		case m.filter != "":
 			m.filter = ""
 			m.refilter()
@@ -611,6 +701,9 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+u":
 		m.scroll(-half)
 		return nil
+	}
+	if m.tab == tabActions {
+		return m.actKey(s)
 	}
 	if m.tab != tabRepos {
 		return nil
@@ -752,21 +845,38 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 	case "list":
 		m.focus = 0
 	case "preview":
-		if m.tab == tabRepos {
+		if m.tab == tabRepos || m.tab == tabActions {
 			m.focus = 1
 		}
+	case "actrow":
+		m.focus = 0
+		double := z.idx == m.lastIdx && time.Since(m.lastClick) < 400*time.Millisecond
+		m.lastIdx, m.lastClick = z.idx, time.Now()
+		var cmd tea.Cmd
+		if z.idx != m.act.cur {
+			m.act.cur = z.idx
+			cmd = m.actSelected()
+		}
+		if double {
+			m.lastIdx = -1
+			return tea.Batch(cmd, m.actLogs())
+		}
+		return cmd
+	case "actfilter":
+		m.act.filter, m.act.cur, m.act.off = z.idx, 0, 0
+		return m.actSelected()
 	case "btn":
 		return m.runButton(z.idx)
 	case "pal":
 		list := m.palMatches()
-		m.palette = false
+		m.closePal()
 		if z.idx < len(list) {
 			return list[z.idx].run(m)
 		}
 	case "hint-help":
 		m.help = !m.help
 	case "hint-pal":
-		m.palette, m.palQ, m.palCur = true, "", 0
+		m.openPicker("", nil)
 	}
 	return nil
 }
@@ -792,7 +902,12 @@ func (m *model) wheel(ms tea.Mouse) tea.Cmd {
 	switch z.id {
 	case "exrow":
 		return m.exMove(d)
+	case "actrow":
+		return m.actMove(d)
 	case "row", "list":
+		if m.tab == tabActions {
+			return m.actMove(d)
+		}
 		if m.exActive() != nil {
 			return m.exMove(d)
 		}
@@ -886,8 +1001,11 @@ func (m *model) actClone(then string) tea.Cmd {
 }
 
 func (m *model) buttons() []button {
+	if b := m.ciButtons(); b != nil {
+		return b
+	}
 	r := m.curRepo()
-	if r == nil {
+	if r == nil || m.tab != tabRepos {
 		return nil
 	}
 	var b []button
@@ -911,6 +1029,20 @@ func (m *model) runButton(i int) tea.Cmd {
 		return nil
 	}
 	switch b[i].id {
+	case "logs":
+		return m.actLogs()
+	case "rerun":
+		return m.actRerun()
+	case "cancel":
+		return m.actCancel()
+	case "workflow":
+		return m.actWorkflows()
+	case "download":
+		return m.actDownload()
+	case "newrel":
+		return m.actNewRelease()
+	case "notes":
+		return m.actRead()
 	case "open":
 		return m.openRepo()
 	case "read":
@@ -926,6 +1058,9 @@ func (m *model) runButton(i int) tea.Cmd {
 	case "clone":
 		return m.actClone("")
 	case "refresh":
+		if m.tab == tabActions {
+			return m.actRefresh()
+		}
 		if m.exActive() != nil {
 			return m.exRefresh()
 		}
@@ -984,6 +1119,17 @@ func (m *model) commands() []command {
 			return m.refresh()
 		}},
 		command{"Show all keys", "?", func(m *model) tea.Cmd { m.help = true; m.pvOff = 0; return nil }},
+		command{"Show failed CI runs", "f", func(m *model) tea.Cmd {
+			m.setTab(tabActions)
+			m.act.filter, m.act.cur, m.act.off = 1, 0, 0
+			return tea.Batch(m.actLoadAll(), m.actSelected())
+		}},
+		command{"Re-run CI run", "R", func(m *model) tea.Cmd { return m.actRerun() }},
+		command{"Cancel CI run", "x", func(m *model) tea.Cmd { return m.actCancel() }},
+		command{"Start a workflow", "w", func(m *model) tea.Cmd { return m.actWorkflows() }},
+		command{"CI logs", "enter", func(m *model) tea.Cmd { return m.actLogs() }},
+		command{"Download release files", "d", func(m *model) tea.Cmd { return m.actDownload() }},
+		command{"New release", "N", func(m *model) tea.Cmd { return m.actNewRelease() }},
 		command{"Quit", "q", func(m *model) tea.Cmd { return tea.Quit }},
 	)
 	return cs
@@ -1023,7 +1169,11 @@ func (m *model) render() string {
 	if m.exActive() != nil {
 		left = m.exListBox(lw, ph, 2)
 	} else {
-		left = m.listBox(lw, ph, 2)
+		if m.tab == tabActions {
+			left = m.actListBox(lw, ph, 2)
+		} else {
+			left = m.listBox(lw, ph, 2)
+		}
 	}
 	right := m.previewBox(pw, ph, lw, 2)
 	for i := 0; i < ph; i++ {
@@ -1075,6 +1225,11 @@ func (m *model) pathBar() string {
 		out = m.exPathBar()
 		if m.help {
 			out += sep + fg(cTxt).Render("Keys")
+		}
+	} else if m.tab == tabActions {
+		out += sep + fg(cHint).Render(actFilters[m.act.filter])
+		if r := m.selRun(); r != nil {
+			out += sep + fg(cTxt).Render(r.Repo) + sep + fg(cTxt).Render(fmt.Sprintf("%s #%d", r.Name, r.Number))
 		}
 	} else if r := m.selected(); r != nil {
 		out += sep + fg(cTxt).Render(r.NameWithOwner)
@@ -1209,6 +1364,8 @@ func (m *model) previewBox(w, h, x0, y0 int) []string {
 	switch {
 	case m.help:
 		title, lines = "Keys", helpLines(inner)
+	case m.tab == tabActions:
+		title, lines = m.actPreview(inner)
 	case m.tab != tabRepos:
 		t := tabs[m.tab]
 		title = t.name
@@ -1359,7 +1516,11 @@ func (m *model) paletteBox(y0 int) []string {
 		y := y0 + 1 + (i - start)
 		m.addZone(1, y, m.w-2, y, "pal", i)
 	}
-	return box("Commands", m.w, n+2, body, true, "")
+	title := "Commands"
+	if m.palTitle != "" {
+		title = m.palTitle
+	}
+	return box(title, m.w, n+2, body, true, "")
 }
 
 func chip(key, label string) string {
@@ -1407,8 +1568,16 @@ func (m *model) hintBar(y int) string {
 	}
 	var h [][2]string
 	switch {
+	case m.tab == tabActions && m.act.filtering:
+		h = [][2]string{{"type", "to find"}, {"↑↓", "move"}, {"enter", "keep"}, {"esc", "clear"}}
+	case m.tab == tabActions:
+		h = [][2]string{{"j/k", "move"}, {"enter", "logs"}, {"R", "re-run"}, {"x", "cancel"}, {"w", "start workflow"}, {"f", "failed/running"}, {"/", "find"}, {"ctrl+p", "commands"}, {"?", "keys"}}
 	case m.tab != tabRepos:
 		h = [][2]string{{"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
+	case m.ex != nil && m.ex.sec == secActions && m.focus == 0:
+		h = [][2]string{{"j/k", "move"}, {"enter", "logs"}, {"R", "re-run"}, {"x", "cancel"}, {"w", "start workflow"}, {"esc", "back"}, {"[ ]", "section"}, {"?", "keys"}}
+	case m.ex != nil && m.ex.sec == secReleases && m.focus == 0:
+		h = [][2]string{{"j/k", "move"}, {"enter", "notes"}, {"d", "download"}, {"N", "new release"}, {"esc", "back"}, {"[ ]", "section"}, {"?", "keys"}}
 	case m.ex != nil && m.focus == 1:
 		h = [][2]string{{"j/k", "scroll"}, {"ctrl+d/u", "page"}, {"esc", "back"}, {"[ ]", "section"}, {"v", "full screen"}, {"e", "nvim"}, {"L", "lazygit"}, {"o", "browser"}, {"ctrl+p", "commands"}, {"?", "keys"}}
 	case m.ex != nil:
@@ -1439,7 +1608,7 @@ func (m *model) hintBar(y int) string {
 
 func helpLines(w int) []string {
 	sec := func(t string) string { return fg(cAcc).Bold(true).Render(t) }
-	row := func(k, d string) string { return "  " + fg(cTxt).Render(fmt.Sprintf("%-12s", k)) + fg(cMut).Render(d) }
+	row := func(k, d string) string { return "  " + fg(cTxt).Render(fmt.Sprintf("%-14s", k)) + fg(cMut).Render(d) }
 	return []string{
 		sec("Everywhere"),
 		row("1 - 7", "switch tab (or click it)"),
@@ -1487,6 +1656,19 @@ func helpLines(w int) []string {
 		row("●", "files changed but not committed"),
 		row("↑2", "2 commits not pushed to GitHub"),
 		row("↓3  ↓", "GitHub has 3 (or some) new commits: pull in lazygit"),
+		"",
+		sec("Actions (CI) — the Actions tab, or a repo's Actions section"),
+		row("enter", "read the logs: jobs and steps are headings, opens at the first error"),
+		row("R", "re-run (only the failed jobs if it failed)"),
+		row("x", "cancel a running run"),
+		row("w", "start a workflow by hand (needs on: workflow_dispatch)"),
+		row("f", "Actions tab: all / failed / running"),
+		row("", "running runs update by themselves every 5 seconds"),
+		"",
+		sec("Releases — a repo's Releases section"),
+		row("enter  v", "read the release notes full screen"),
+		row("d", "download its files to Downloads"),
+		row("N", "new release: tag, title, notes in Nvim (or from the commits)"),
 		"",
 		sec("Mouse"),
 		row("click", "tabs, repos, buttons, commands"),

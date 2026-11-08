@@ -55,6 +55,7 @@ const (
 	icNvim    = ""
 	icGit     = ""
 	icClose   = ""
+	icTag     = ""
 	icRead    = ""
 )
 

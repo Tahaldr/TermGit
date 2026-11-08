@@ -20,10 +20,12 @@ const (
 	secCode = iota
 	secCommits
 	secBranches
+	secActions
+	secReleases
 )
 
-var secNames = []string{"Code", "Commits", "Branches"}
-var secIcons = []string{icCode, icCommit, icBranch}
+var secNames = []string{"Code", "Commits", "Branches", "Actions", "Releases"}
+var secIcons = []string{icCode, icCommit, icBranch, icActions, icTag}
 
 type explorer struct {
 	repo      Repo
@@ -31,17 +33,19 @@ type explorer struct {
 	refOid    string
 	sec       int
 	dir       string // folder shown in Code ("" = top)
-	cur, off  [3]int
-	query     [3]string
+	cur, off  [5]int
+	query     [5]string
 	filtering bool
 	dirCur    map[string]int // where the cursor was in each folder, for going back
 }
 
 type exItem struct {
-	kind   string // up, dir, file, sub, commit, branch
-	ent    treeEntry
-	commit *Commit
-	branch *Branch
+	kind    string // up, dir, file, sub, commit, branch
+	ent     treeEntry
+	commit  *Commit
+	branch  *Branch
+	run     *Run
+	release *Release
 }
 
 type appDoneMsg struct {
@@ -132,6 +136,24 @@ func (m *model) exItems() []exItem {
 				}
 			}
 		}
+	case secActions:
+		if rl := m.runs[ex.repo.NameWithOwner]; rl != nil {
+			for i := range rl.items {
+				r := &rl.items[i]
+				if q == "" || fuzzy(strings.ToLower(r.Name+" "+r.Title+" "+r.Branch), q) {
+					out = append(out, exItem{kind: "run", run: r})
+				}
+			}
+		}
+	case secReleases:
+		if rl := m.releases[ex.repo.NameWithOwner]; rl != nil {
+			for i := range rl.items {
+				r := &rl.items[i]
+				if q == "" || fuzzy(strings.ToLower(r.title()+" "+r.Tag), q) {
+					out = append(out, exItem{kind: "release", release: r})
+				}
+			}
+		}
 	case secBranches:
 		if bl := m.blists[ex.repo.NameWithOwner]; bl != nil {
 			for i := range bl.items {
@@ -206,6 +228,10 @@ func (m *model) exLoad() tea.Cmd {
 		cmds = append(cmds, m.load("commits:"+m.treeKey(), false, fetchCommits(nwo, ex.ref)))
 	case secBranches:
 		cmds = append(cmds, m.load("branches:"+nwo, false, fetchBranches(nwo, ex.repo.Branch())))
+	case secActions:
+		cmds = append(cmds, m.load("runs:"+nwo, false, fetchRuns(nwo)))
+	case secReleases:
+		cmds = append(cmds, m.load("releases:"+nwo, false, fetchReleases(nwo)))
 	}
 	if it, ok := m.exSel(); ok {
 		switch it.kind {
@@ -219,6 +245,8 @@ func (m *model) exLoad() tea.Cmd {
 			}
 		case "commit":
 			cmds = append(cmds, m.load("commit:"+nwo+"@"+it.commit.Oid, true, fetchCommitDetail(nwo, it.commit.Oid)))
+		case "run":
+			cmds = append(cmds, m.loadJobs(it.run, true))
 		}
 	}
 	return tea.Batch(cmds...)
@@ -315,11 +343,15 @@ func (m *model) exActivate() tea.Cmd {
 		m.focus = 1
 	case "sub", "commit":
 		m.focus = 1
+	case "run":
+		return m.actLogs()
+	case "release":
+		return m.actRead()
 	case "branch":
 		ex.ref, ex.refOid = it.branch.Name, it.branch.Commit.Oid
 		ex.dir, ex.cur[secCode], ex.off[secCode], ex.cur[secCommits], ex.off[secCommits] = "", 0, 0, 0, 0
 		ex.dirCur = map[string]int{}
-		ex.query = [3]string{}
+		ex.query = [5]string{}
 		cmd := m.exSetSec(secCode)
 		return tea.Batch(cmd, m.setStatus("Showing branch "+ex.ref, false))
 	}
@@ -347,7 +379,7 @@ func (m *model) exBack() tea.Cmd {
 func (m *model) exRefresh() tea.Cmd {
 	nwo := m.ex.repo.NameWithOwner
 	for k := range m.loaded {
-		for _, p := range []string{"tree:", "commits:", "branches:"} {
+		for _, p := range []string{"tree:", "commits:", "branches:", "runs:", "releases:", "jobs:"} {
 			if strings.HasPrefix(k, p+nwo) {
 				delete(m.loaded, k)
 			}
@@ -360,6 +392,11 @@ func (m *model) exRefresh() tea.Cmd {
 
 func (m *model) exKey(s string) tea.Cmd {
 	ex := m.ex
+	if ex.sec == secActions || ex.sec == secReleases {
+		if cmd, ok := m.ciKey(s); ok {
+			return cmd
+		}
+	}
 	half := m.exRows() / 2
 	switch s {
 	case "tab", "shift+tab":
@@ -496,6 +533,12 @@ func escPath(p string) string {
 
 // curURL is the GitHub page for what's on screen
 func (m *model) curURL() string {
+	if m.tab == tabActions {
+		if r := m.selRun(); r != nil {
+			return r.URL
+		}
+		return ""
+	}
 	r := m.curRepo()
 	if r == nil {
 		return ""
@@ -527,6 +570,16 @@ func (m *model) curURL() string {
 			return r.URL + "/tree/" + escPath(it.branch.Name)
 		}
 		return r.URL + "/branches"
+	case secActions:
+		if ok {
+			return it.run.URL
+		}
+		return r.URL + "/actions"
+	case secReleases:
+		if ok {
+			return it.release.URL
+		}
+		return r.URL + "/releases"
 	}
 	return r.URL
 }
@@ -566,8 +619,16 @@ func (m *model) exListBox(w, h, y0 int) []string {
 	// section tabs in the top border: Code  Commits  Branches
 	title := ""
 	x := 3
+	full := 0
+	for i, n := range secNames {
+		full += width(secIcons[i]+" "+n) + 2
+	}
+	compact := full > w-6 // narrow panel: only the open section shows its name
 	for i, n := range secNames {
 		label := secIcons[i] + " " + n
+		if compact && i != ex.sec {
+			label = secIcons[i]
+		}
 		if i > 0 {
 			title += fg(cDim).Render("  ")
 			x += 2
@@ -588,7 +649,7 @@ func (m *model) exListBox(w, h, y0 int) []string {
 		if ex.filtering {
 			cursor = fg(cAcc).Render("▏")
 		}
-		what := map[int]string{secCode: "find a file", secCommits: "find a commit", secBranches: "find a branch"}[ex.sec]
+		what := map[int]string{secCode: "find a file", secCommits: "find a commit", secBranches: "find a branch", secActions: "find a run", secReleases: "find a release"}[ex.sec]
 		q := fg(cTxt).Render(ex.query[ex.sec])
 		if ex.query[ex.sec] == "" {
 			q = ""
@@ -614,6 +675,18 @@ func (m *model) exListBox(w, h, y0 int) []string {
 		empty = "Loading commits…"
 	case ex.sec == secCommits && m.clists[m.treeKey()].err != "":
 		empty = m.clists[m.treeKey()].err
+	case ex.sec == secActions && m.runs[ex.repo.NameWithOwner] == nil:
+		empty = "Loading runs…"
+	case ex.sec == secActions && m.runs[ex.repo.NameWithOwner].err != "":
+		empty = m.runs[ex.repo.NameWithOwner].err
+	case ex.sec == secActions && len(items) == 0 && ex.query[ex.sec] == "":
+		empty = "No CI runs yet. w starts a workflow."
+	case ex.sec == secReleases && m.releases[ex.repo.NameWithOwner] == nil:
+		empty = "Loading releases…"
+	case ex.sec == secReleases && m.releases[ex.repo.NameWithOwner].err != "":
+		empty = m.releases[ex.repo.NameWithOwner].err
+	case ex.sec == secReleases && len(items) == 0 && ex.query[ex.sec] == "":
+		empty = "No releases yet. N makes one."
 	case ex.sec == secBranches && m.blists[ex.repo.NameWithOwner] == nil:
 		empty = "Loading branches…"
 	case ex.sec == secBranches && m.blists[ex.repo.NameWithOwner].err != "":
@@ -644,6 +717,12 @@ func (m *model) exListBox(w, h, y0 int) []string {
 }
 
 func (m *model) exRow(it exItem, w int, sel bool) string {
+	switch it.kind {
+	case "run":
+		return m.runRow(it.run, w, sel, false)
+	case "release":
+		return m.releaseRow(it.release, w, sel)
+	}
 	st := lipgloss.NewStyle()
 	if sel {
 		bg := cChip
@@ -745,6 +824,10 @@ func (m *model) exPreview(w int) (string, []string) {
 			return "Commit", nil
 		case secBranches:
 			return "Branch", nil
+		case secActions:
+			return "Run", nil
+		case secReleases:
+			return "Release", nil
 		}
 		return "Code", nil
 	}
@@ -770,6 +853,10 @@ func (m *model) exPreview(w int) (string, []string) {
 		return "Commit " + it.commit.Short, m.commitPreview(it.commit, w)
 	case "branch":
 		return "Branch", m.branchPreview(it.branch, w)
+	case "run":
+		return fmt.Sprintf("Run #%d", it.run.Number), m.runPreview(it.run, w)
+	case "release":
+		return "Release", m.releasePreview(it.release, w)
 	}
 	return "", nil
 }

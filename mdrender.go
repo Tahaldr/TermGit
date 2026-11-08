@@ -31,6 +31,7 @@ type mdHeading struct {
 type mdDoc struct {
 	lines []string
 	heads []mdHeading
+	jump  int // line to open at (first error in a log), -1 or 0 = top
 }
 
 var (

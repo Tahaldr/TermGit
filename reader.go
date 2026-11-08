@@ -20,9 +20,11 @@ import (
 type reader struct {
 	title, sub string
 	icon       string
-	mdSrc      func(m *model) (string, bool)  // markdown text, if this is markdown and it's loaded
-	content    func(m *model, w int) []string // anything else (code, commit, loading message)
-	path       string                         // a file on this PC (termgit file.md)
+	mdSrc      func(m *model) (string, bool)       // markdown text, if this is markdown and it's loaded
+	docFn      func(m *model, w int) (mdDoc, bool) // ready-made lines + headings (CI logs)
+	autoJump   bool                                // open at doc.jump once it's there
+	content    func(m *model, w int) []string      // anything else (code, commit, loading message)
+	path       string                              // a file on this PC (termgit file.md)
 	text       string
 	mtime      time.Time
 
@@ -47,6 +49,14 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 func (m *model) rdLines(w int) ([]string, []mdHeading) {
 	rd := m.rd
+	if rd.docFn != nil {
+		if d, ok := rd.docFn(m, w); ok {
+			if rd.autoJump && d.jump > 0 {
+				rd.off, rd.autoJump = max(0, d.jump-3), false
+			}
+			return d.lines, d.heads
+		}
+	}
 	if rd.mdSrc != nil {
 		if src, ok := rd.mdSrc(m); ok && strings.TrimSpace(src) != "" {
 			if rd.cacheW != w || rd.cacheSrc != src {
@@ -79,6 +89,12 @@ func (m *model) readerFor() *reader {
 			return nil
 		}
 		nwo := ex.repo.NameWithOwner
+		if it.kind == "release" {
+			rel := it.release
+			return &reader{title: rel.title(), sub: nwo + " · " + rel.Tag, icon: icTag,
+				mdSrc:   func(m *model) (string, bool) { return rel.Body, true },
+				content: func(m *model, w int) []string { return []string{fg(cMut).Render("No release notes.")} }}
+		}
 		var e *treeEntry
 		switch it.kind {
 		case "file":
@@ -120,6 +136,9 @@ func (m *model) readerFor() *reader {
 }
 
 func (m *model) actRead() tea.Cmd {
+	if m.selRun() != nil {
+		return m.actLogs()
+	}
 	rd := m.readerFor()
 	if rd == nil {
 		return nil
@@ -363,7 +382,10 @@ func (m *model) tocWidth() int {
 	if !m.rd.outline {
 		return 0
 	}
+	aj := m.rd.autoJump // only counting headings here: don't jump yet
+	m.rd.autoJump = false
 	_, heads := m.rdLines(80)
+	m.rd.autoJump = aj
 	if len(heads) < 2 {
 		return 0
 	}
