@@ -296,6 +296,9 @@ func (m *model) exActivate() tea.Cmd {
 	case "dir":
 		return m.exGoDir(it.ent.Path)
 	case "file":
+		if isMarkdown(it.ent.Path) && ex.query[secCode] == "" {
+			return m.actRead() // markdown opens straight in the reader
+		}
 		if ex.query[secCode] != "" { // a search result: jump to its folder, then show it
 			ex.query[secCode], ex.filtering = "", false
 			ex.dir = parentDir(it.ent.Path)
@@ -379,6 +382,8 @@ func (m *model) exKey(s string) tea.Cmd {
 		return m.actOpen("nvim")
 	case "L":
 		return m.actOpen("lazygit")
+	case "v":
+		return m.actRead()
 	case "enter", "l", "right":
 		if m.focus == 0 {
 			return m.exActivate()

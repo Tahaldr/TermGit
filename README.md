@@ -9,12 +9,13 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | --- | --- | --- |
 | 1 | Base: layout, tabs, mouse, command palette, bottom-bar prompts, Repos list + README | done |
 | 2 | Repo explorer: code, commits, branches, Nvim, lazygit, local badges | done |
-| 3 | Actions + Releases | next |
-| 4 | Issues | |
-| 5 | PRs | |
-| 6 | Home + Inbox | |
-| 7 | Explore + repo management | |
-| 8 | Polish: settings, help page, tests | |
+| 3 | Markdown reader: Nvim-style markdown, full-screen reader, Contents, `termgit file.md` | done |
+| 4 | Actions + Releases | next |
+| 5 | Issues | |
+| 6 | PRs | |
+| 7 | Home + Inbox | |
+| 8 | Explore + repo management | |
+| 9 | Polish: settings, help page, tests | |
 
 ## Keys
 
@@ -32,8 +33,17 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | `/` | filter repos; inside a repo: find a file, commit or branch |
 | `ctrl+d` / `ctrl+u` | scroll the right panel |
 | `o` / `y` / `c` / `r` | browser / copy link (of what's on screen) / clone / refresh |
+| `v` | read full screen (README, file, commit) |
 | `esc` | back |
 | `q` | quit |
+
+## Reader
+
+Markdown is drawn like render-markdown.nvim: heading bars with icons, `□` / `■` checkboxes
+(done ones faded), code blocks with the language on top, tables, quotes and GitHub callouts.
+
+- `termgit notes.md` opens any file on this PC full screen; it reloads when you save the file.
+- `]` / `[` next / previous heading, `t` Contents panel (click a heading), `/` find, `n` / `N` matches, `e` edit in Nvim.
 
 ## Build
 

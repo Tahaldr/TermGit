@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	args := os.Args[1:]
@@ -24,7 +24,24 @@ func main() {
 			// test helper: termgit --dump 140x40 [keys or click:x,y / wheel:x,y,up|down ...]
 			dump(args[1:])
 			return
+		case "--help", "-h":
+			fmt.Println("termgit            GitHub in the terminal")
+			fmt.Println("termgit FILE       read a file (markdown or code) full screen; reloads when it changes")
+			fmt.Println("termgit --version")
+			return
 		}
+		// termgit notes.md: open the reader on a file
+		rd, err := loadFileReader(args[0])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "termgit:", err)
+			os.Exit(1)
+		}
+		m := newSoloModel(rd)
+		if _, err := tea.NewProgram(m).Run(); err != nil {
+			fmt.Fprintln(os.Stderr, "termgit:", err)
+			os.Exit(1)
+		}
+		return
 	}
 	if _, err := tea.NewProgram(newModel()).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "termgit:", err)
@@ -44,6 +61,15 @@ func dump(args []string) {
 		}
 	}
 	m := newModel()
+	if len(args) > 0 && strings.HasPrefix(args[0], "file:") {
+		rd, err := loadFileReader(args[0][5:])
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		m = newSoloModel(rd)
+		args = args[1:]
+	}
 	m.dump = true
 	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	drain(m, m.Init())

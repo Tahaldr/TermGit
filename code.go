@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"path"
 	"strings"
 
@@ -17,46 +18,57 @@ var codeStyle = styles.Get("onedark")
 
 // highlight colors source code and returns one string per line, with line numbers
 func highlight(name, text string) []string {
-	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\t", "    ")
-	text = strings.TrimRight(text, "\n")
+	text = strings.TrimRight(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	lexer := lexers.Match(name)
 	if lexer == nil {
 		lexer = lexers.Analyse(text)
 	}
-	if lexer == nil {
-		lexer = lexers.Fallback
-	}
-	lexer = chroma.Coalesce(lexer)
-
-	var lines []string
-	cur := ""
-	if it, err := lexer.Tokenise(nil, text); err == nil {
-		for _, tok := range it.Tokens() {
-			st := lipgloss.NewStyle().Foreground(cTxt)
-			if e := codeStyle.Get(tok.Type); e.Colour.IsSet() {
-				st = st.Foreground(lipgloss.Color(e.Colour.String()))
-			}
-			parts := strings.Split(tok.Value, "\n")
-			for i, p := range parts {
-				if i > 0 {
-					lines = append(lines, cur)
-					cur = ""
-				}
-				if p != "" {
-					cur += st.Render(p)
-				}
-			}
-		}
-		lines = append(lines, cur)
-	} else {
-		lines = strings.Split(text, "\n")
-	}
+	lines := colorCode(lexer, text, nil)
 	digits := len(fmt.Sprint(len(lines)))
 	num := fg(cDim)
 	for i := range lines {
 		lines[i] = num.Render(fmt.Sprintf("%*d  ", digits, i+1)) + lines[i]
 	}
 	return lines
+}
+
+// colorCode splits code into colored lines (bg = background color, or nil)
+func colorCode(lexer chroma.Lexer, text string, bg color.Color) []string {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\t", "    ")
+	if lexer == nil {
+		lexer = lexers.Fallback
+	}
+	lexer = chroma.Coalesce(lexer)
+	base := lipgloss.NewStyle().Foreground(cTxt)
+	if bg != nil {
+		base = base.Background(bg)
+	}
+	it, err := lexer.Tokenise(nil, text)
+	if err != nil {
+		out := strings.Split(text, "\n")
+		for i := range out {
+			out[i] = base.Render(out[i])
+		}
+		return out
+	}
+	var lines []string
+	cur := ""
+	for _, tok := range it.Tokens() {
+		st := base
+		if e := codeStyle.Get(tok.Type); e.Colour.IsSet() {
+			st = st.Foreground(lipgloss.Color(e.Colour.String()))
+		}
+		for i, p := range strings.Split(tok.Value, "\n") {
+			if i > 0 {
+				lines = append(lines, cur)
+				cur = ""
+			}
+			if p != "" {
+				cur += st.Render(p)
+			}
+		}
+	}
+	return append(lines, cur)
 }
 
 func isMarkdown(name string) bool {

@@ -22,8 +22,8 @@ type tabInfo struct {
 }
 
 var tabs = []tabInfo{
-	{"Home", icHome, 6}, {"Repos", icRepo, 0}, {"Issues", icIssue, 4}, {"PRs", icPR, 5},
-	{"Actions", icActions, 3}, {"Inbox", icInbox, 6}, {"Explore", icExplore, 7},
+	{"Home", icHome, 7}, {"Repos", icRepo, 0}, {"Issues", icIssue, 5}, {"PRs", icPR, 6},
+	{"Actions", icActions, 4}, {"Inbox", icInbox, 7}, {"Explore", icExplore, 8},
 }
 
 const tabRepos = 1
@@ -109,6 +109,10 @@ type model struct {
 	lastClick time.Time
 	lastIdx   int
 
+	// reader (batch 3): full screen; solo = started as `termgit file.md`
+	rd   *reader
+	solo bool
+
 	// repo explorer (batch 2)
 	ex       *explorer
 	exSaved  map[string]*explorer
@@ -144,6 +148,12 @@ func newModel() *model {
 }
 
 func (m *model) Init() tea.Cmd {
+	if m.solo {
+		if m.dump {
+			return nil
+		}
+		return watch()
+	}
 	m.loading = true
 	return tea.Batch(fetchRepos(), m.onSelect(), m.scanLocalInfo())
 }
@@ -370,6 +380,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case localMsg:
 		m.linfo = msg
+	case watchTick:
+		m.rdReload()
+		return m, watch()
 	case loadTick:
 		if msg.seq == m.loadSeq {
 			if run, ok := m.pending[msg.key]; ok {
@@ -487,6 +500,11 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 			editText(&p.text, k)
 		}
 		return nil
+	}
+
+	// full-screen reader
+	if m.rd != nil {
+		return m.rdKey(k)
 	}
 
 	// command palette
@@ -615,6 +633,8 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		return m.actOpen("nvim")
 	case "L":
 		return m.actOpen("lazygit")
+	case "v":
+		return m.actRead()
 	case "/":
 		m.filtering, m.focus = true, 0
 	case "r":
@@ -678,6 +698,9 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 	z := m.zoneAt(ms.X, ms.Y)
 	if z == nil {
 		return nil
+	}
+	if m.rd != nil {
+		return m.rdClick(z)
 	}
 	switch z.id {
 	case "tab":
@@ -756,6 +779,10 @@ func (m *model) wheel(ms tea.Mouse) tea.Cmd {
 	case tea.MouseWheelUp:
 		d = -1
 	default:
+		return nil
+	}
+	if m.rd != nil {
+		m.rdScroll(d * 3)
 		return nil
 	}
 	z := m.zoneAt(ms.X, ms.Y)
@@ -865,7 +892,9 @@ func (m *model) buttons() []button {
 	}
 	var b []button
 	if m.exActive() == nil {
-		b = append(b, button{icRepo + " Open", "enter", "open"})
+		b = append(b, button{icRepo + " Open", "enter", "open"}, button{icRead + " Read", "v", "read"})
+	} else {
+		b = append(b, button{icRead + " Full screen", "v", "read"})
 	}
 	b = append(b, button{icNvim + " Nvim", "e", "nvim"}, button{icGit + " lazygit", "L", "lazygit"},
 		button{icGlobe + " Browser", "o", "browser"}, button{icLink + " Copy link", "y", "copy"})
@@ -884,6 +913,8 @@ func (m *model) runButton(i int) tea.Cmd {
 	switch b[i].id {
 	case "open":
 		return m.openRepo()
+	case "read":
+		return m.actRead()
 	case "nvim":
 		return m.actOpen("nvim")
 	case "lazygit":
@@ -940,6 +971,7 @@ func (m *model) commands() []command {
 		)
 	}
 	cs = append(cs,
+		command{"Read full screen", "v", func(m *model) tea.Cmd { return m.actRead() }},
 		command{"Open in Nvim", "e", func(m *model) tea.Cmd { return m.actOpen("nvim") }},
 		command{"Open in lazygit", "L", func(m *model) tea.Cmd { return m.actOpen("lazygit") }},
 		command{"Open in browser", "o", func(m *model) tea.Cmd { return m.actBrowser() }},
@@ -964,9 +996,12 @@ func (m *model) commands() []command {
 func (m *model) View() tea.View {
 	m.zones = m.zones[:0]
 	var content string
-	if m.w < 70 || m.h < 16 {
+	switch {
+	case m.w < 70 || m.h < 16:
 		content = fg(cMut).Render("TermGit needs a bigger window (at least 70 x 16).")
-	} else {
+	case m.rd != nil:
+		content = m.rdRender()
+	default:
 		content = m.render()
 	}
 	v := tea.NewView(content)
@@ -1375,13 +1410,13 @@ func (m *model) hintBar(y int) string {
 	case m.tab != tabRepos:
 		h = [][2]string{{"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
 	case m.ex != nil && m.focus == 1:
-		h = [][2]string{{"j/k", "scroll"}, {"ctrl+d/u", "page"}, {"esc", "back"}, {"[ ]", "section"}, {"e", "nvim"}, {"L", "lazygit"}, {"o", "browser"}, {"ctrl+p", "commands"}, {"?", "keys"}}
+		h = [][2]string{{"j/k", "scroll"}, {"ctrl+d/u", "page"}, {"esc", "back"}, {"[ ]", "section"}, {"v", "full screen"}, {"e", "nvim"}, {"L", "lazygit"}, {"o", "browser"}, {"ctrl+p", "commands"}, {"?", "keys"}}
 	case m.ex != nil:
-		h = [][2]string{{"j/k", "move"}, {"enter", "open"}, {"esc", "back"}, {"[ ]", "section"}, {"/", "find"}, {"e", "nvim"}, {"L", "lazygit"}, {"ctrl+p", "commands"}, {"?", "keys"}}
+		h = [][2]string{{"j/k", "move"}, {"enter", "open"}, {"esc", "back"}, {"[ ]", "section"}, {"/", "find"}, {"v", "full screen"}, {"e", "nvim"}, {"L", "lazygit"}, {"ctrl+p", "commands"}, {"?", "keys"}}
 	case m.focus == 1:
 		h = [][2]string{{"j/k", "scroll"}, {"ctrl+d/u", "page"}, {"g/G", "top/end"}, {"esc", "back to list"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
 	default:
-		h = [][2]string{{"j/k", "move"}, {"enter", "open repo"}, {"tab", "README"}, {"/", "filter"}, {"e", "nvim"}, {"L", "lazygit"}, {"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
+		h = [][2]string{{"j/k", "move"}, {"enter", "open repo"}, {"v", "read README"}, {"/", "filter"}, {"e", "nvim"}, {"L", "lazygit"}, {"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
 	}
 	out := " " + hints(h)
 	// the "?" and "ctrl+p" hints are clickable too
@@ -1417,7 +1452,8 @@ func helpLines(w int) []string {
 		sec("Repo list"),
 		row("j/k  ↑/↓", "move (or mouse wheel)"),
 		row("enter", "open the repo: code, commits, branches (or double-click)"),
-		row("tab  l", "read the README on the right"),
+		row("tab  l", "scroll the README on the right"),
+		row("v", "read the README full screen"),
 		row("/", "filter by name, description or language"),
 		row("g / G", "first / last"),
 		"",
@@ -1427,6 +1463,16 @@ func helpLines(w int) []string {
 		row("esc  h  ⌫", "back: up a folder, then to the repo list"),
 		row("/", "find a file anywhere in the repo, a commit or a branch"),
 		row("crumbs", "click the path at the top to jump back"),
+		row("v", "full screen: the file, folder README or commit"),
+		"",
+		sec("Reader (full screen)"),
+		row("j/k space", "scroll a line / a page (or mouse wheel)"),
+		row("]  [", "next / previous heading"),
+		row("t", "show / hide Contents (click a heading to jump)"),
+		row("/  n  N", "find text, next / previous match"),
+		row("e", "edit in Nvim"),
+		row("esc  q", "close"),
+		row("termgit x.md", "open any file on this PC in the reader"),
 		"",
 		sec("Selected repo / file"),
 		row("e", "open in Nvim (the highlighted file if it's on this PC)"),

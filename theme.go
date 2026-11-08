@@ -4,9 +4,6 @@ import (
 	"image/color"
 	"strings"
 
-	"charm.land/glamour/v2"
-	gansi "charm.land/glamour/v2/ansi"
-	"charm.land/glamour/v2/styles"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -57,6 +54,8 @@ const (
 	icUp      = ""
 	icNvim    = ""
 	icGit     = ""
+	icClose   = ""
+	icRead    = ""
 )
 
 // ---- string helpers (ANSI-aware) ----
@@ -122,60 +121,4 @@ func box(title string, w, h int, body []string, focus bool, note string) []strin
 	}
 	out = append(out, b.Render("╰"+strings.Repeat("─", fill))+bot+b.Render("╯"))
 	return out
-}
-
-// ---- markdown (READMEs) ----
-
-func sp(s string) *string { return &s }
-func up(u uint) *uint     { return &u }
-func bp(b bool) *bool     { return &b }
-
-func mdStyle() gansi.StyleConfig {
-	s := styles.DarkStyleConfig
-	s.Document.Color = sp("#abb2bf")
-	s.Document.Margin = up(0)
-	s.Document.BlockPrefix = ""
-	s.Heading.Color = sp("#61afef")
-	s.H1.Color = sp("#61afef")
-	s.H1.BackgroundColor = nil
-	s.H1.Prefix = "# "
-	s.H1.Suffix = ""
-	s.Link.Color = sp("#61afef")
-	s.LinkText.Color = sp("#61afef")
-	s.LinkText.Bold = bp(false)
-	s.Image.Color = sp("#565c64")
-	s.ImageText.Color = sp("#565c64")
-	s.Code.Color = sp("#d19a66")
-	s.Code.BackgroundColor = sp("#2d3139")
-	s.CodeBlock.Theme = "onedark"
-	s.CodeBlock.Chroma = nil
-	s.CodeBlock.Margin = up(0)
-	s.BlockQuote.Color = sp("#818792")
-	s.HorizontalRule.Color = sp("#3e4451")
-	s.Strong.Color = sp("#c8ccd4")
-	return s
-}
-
-var mdRenderers = map[int]*glamour.TermRenderer{}
-
-func renderMarkdown(md string, w int) []string {
-	r, ok := mdRenderers[w]
-	if !ok {
-		var err error
-		r, err = glamour.NewTermRenderer(glamour.WithStyles(mdStyle()), glamour.WithWordWrap(w))
-		if err != nil {
-			return strings.Split(md, "\n")
-		}
-		mdRenderers[w] = r
-	}
-	out, err := r.Render(md)
-	if err != nil {
-		return strings.Split(md, "\n")
-	}
-	lines := strings.Split(strings.TrimRight(out, "\n "), "\n")
-	// drop leading blank lines
-	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[0])) == "" {
-		lines = lines[1:]
-	}
-	return lines
 }
