@@ -115,6 +115,11 @@ type model struct {
 	lastClick time.Time
 	lastIdx   int
 
+	// local git (batch 7)
+	changes   map[string]*changeList
+	diffs     map[string]*fileDiff
+	cardLines []int // where each PR comment card starts in the right panel
+
 	// pull requests (batch 6)
 	prs        prState
 	prLists    map[string]*prList
@@ -167,6 +172,7 @@ func newModel() *model {
 		runs: map[string]*runList{}, jobs: map[string]*jobList{}, releases: map[string]*releaseList{},
 		logs: map[string]map[int64]string{}, issueLists: map[string]*issueList{}, comments: map[string]*commentList{},
 		prLists: map[string]*prList{}, prDetails: map[string]*prDetail{}, prFilesMap: map[string]*prFiles{},
+		changes: map[string]*changeList{}, diffs: map[string]*fileDiff{},
 	}
 	m.loadRuns()
 	var c reposCache
@@ -410,8 +416,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(st, m.scanLocalInfo(), m.runApp(msg.then, msg.dest))
 		}
 		return m, tea.Batch(st, m.scanLocalInfo())
+	case gitDoneMsg:
+		return m, m.onGitDone(msg)
 	case appDoneMsg:
+		for dir := range m.changes {
+			m.chForget(dir) // you may have changed files in Nvim / lazygit
+		}
 		cmd := m.scanLocalInfo()
+		if m.exActive() != nil {
+			cmd = tea.Batch(cmd, m.exLoad())
+		}
 		if msg.err != nil {
 			return m, tea.Batch(cmd, m.setStatus(appName(msg.app)+" stopped: "+msg.err.Error(), true))
 		}
@@ -833,8 +847,10 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		return m.actOpen("nvim")
 	case "L":
 		return m.actOpen("lazygit")
-	case "P":
+	case "p":
 		return m.actPull()
+	case "P":
+		return m.actPush()
 	case "v":
 		return m.actRead()
 	case "/":
@@ -976,6 +992,8 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 		return m.prSelected()
 	case "prview":
 		return m.prSetView(z.idx)
+	case "prcard":
+		m.focus, m.prs.cmt = 1, z.idx
 	case "issrow":
 		m.focus = 0
 		double := z.idx == m.lastIdx && time.Since(m.lastClick) < 400*time.Millisecond
@@ -1106,6 +1124,13 @@ func (m *model) actBrowser() tea.Cmd {
 	if m.dump {
 		return m.setStatus("Would open "+u, false)
 	}
+	return m.openURL(u)
+}
+
+func (m *model) openURL(u string) tea.Cmd {
+	if m.dump {
+		return m.setStatus("Would open "+u, false)
+	}
 	if err := browser.New("", io.Discard, io.Discard).Browse(u); err != nil {
 		return m.setStatus("Couldn't open the browser: "+err.Error(), true)
 	}
@@ -1156,6 +1181,9 @@ func (m *model) actClone(then string) tea.Cmd {
 }
 
 func (m *model) buttons() []button {
+	if b := m.chButtons(); b != nil {
+		return b
+	}
 	if b := m.issButtons(); b != nil {
 		return b
 	}
@@ -1180,7 +1208,10 @@ func (m *model) buttons() []button {
 	if m.localPath(r) == "" {
 		b = append(b, button{icDown + " Clone", "c", "clone"})
 	} else if li := m.linfo[strings.ToLower(r.NameWithOwner)]; li.behind > 0 || li.missing {
-		b = append(b, button{icDown + " Pull", "P", "pull"})
+		b = append(b, button{icDown + " Pull", "p", "pull"})
+	}
+	if li := m.linfo[strings.ToLower(r.NameWithOwner)]; li.ahead > 0 {
+		b = append(b, button{icUp + " Push", "P", "push"})
 	}
 	b = append(b, button{icRefresh + " Refresh", "r", "refresh"})
 	return b
@@ -1243,7 +1274,26 @@ func (m *model) runButton(i int) tea.Cmd {
 	case "lazygit":
 		return m.actOpen("lazygit")
 	case "pull":
+		if m.exActive() != nil {
+			return m.chPull()
+		}
 		return m.actPull()
+	case "push":
+		if m.exActive() != nil {
+			return m.chPush()
+		}
+		return m.actPush()
+	case "stage":
+		cmd, _ := m.chKey("space")
+		return cmd
+	case "stageall":
+		cmd, _ := m.chKey("a")
+		return cmd
+	case "commit":
+		return m.chCommit(false)
+	case "discard":
+		cmd, _ := m.chKey("d")
+		return cmd
 	case "browser":
 		return m.actBrowser()
 	case "copy":
@@ -1308,7 +1358,32 @@ func (m *model) commands() []command {
 		command{"Read full screen", "v", func(m *model) tea.Cmd { return m.actRead() }},
 		command{"Open in Nvim", "e", func(m *model) tea.Cmd { return m.actOpen("nvim") }},
 		command{"Open in lazygit", "L", func(m *model) tea.Cmd { return m.actOpen("lazygit") }},
-		command{"Pull from GitHub", "P", func(m *model) tea.Cmd { return m.actPull() }},
+		command{"Pull from GitHub", "p", func(m *model) tea.Cmd {
+			if m.exActive() != nil {
+				return m.chPull()
+			}
+			return m.actPull()
+		}},
+		command{"Push to GitHub", "P", func(m *model) tea.Cmd {
+			if m.exActive() != nil {
+				return m.chPush()
+			}
+			return m.actPush()
+		}},
+		command{"Commit", "c", func(m *model) tea.Cmd { return m.chCommit(false) }},
+		command{"Commit (message in Nvim)", "C", func(m *model) tea.Cmd { return m.chCommit(true) }},
+		command{"Amend the last commit", "A", func(m *model) tea.Cmd { return m.chAmend() }},
+		command{"Fetch from GitHub", "f", func(m *model) tea.Cmd { cmd, _ := m.chKey("f"); return cmd }},
+		command{"Show my changes", "", func(m *model) tea.Cmd {
+			if m.ex == nil {
+				m.setTab(tabRepos)
+				m.openRepo()
+			}
+			if m.ex != nil {
+				return m.exSetSec(secChanges)
+			}
+			return nil
+		}},
 		command{"Open in browser", "o", func(m *model) tea.Cmd { return m.actBrowser() }},
 		command{"Copy link", "y", func(m *model) tea.Cmd { return m.actCopy() }},
 		command{"Clone repo", "c", func(m *model) tea.Cmd { return m.actClone("") }},
@@ -1352,6 +1427,7 @@ func (m *model) commands() []command {
 
 func (m *model) View() tea.View {
 	m.zones = m.zones[:0]
+	m.cardLines = nil
 	var content string
 	switch {
 	case m.w < 70 || m.h < 16:
@@ -1619,6 +1695,13 @@ func (m *model) previewBox(w, h, x0, y0 int) []string {
 	if m.pvOff > m.pvMax {
 		m.pvOff = m.pvMax
 	}
+	// PR comment cards are clickable
+	for i := 0; i+1 < len(m.cardLines); i++ {
+		a, b := max(m.cardLines[i], m.pvOff), min(m.cardLines[i+1], m.pvOff+rows)
+		if a < b {
+			m.addZone(x0+1, y0+1+a-m.pvOff, x0+w-2, y0+b-m.pvOff, "prcard", i)
+		}
+	}
 	note := ""
 	if m.pvMax > 0 {
 		note = fmt.Sprintf("%d%%", (m.pvOff*100)/m.pvMax)
@@ -1799,6 +1882,8 @@ func (m *model) hintBar(y int) string {
 	switch {
 	case m.tab == tabPRs && m.prs.filtering:
 		h = [][2]string{{"type", "to find"}, {"↑↓", "move"}, {"enter", "keep"}, {"esc", "clear"}}
+	case (m.tab == tabPRs || m.ex != nil && m.ex.sec == secPRs) && m.focus == 1 && m.prs.view == pvComments:
+		h = [][2]string{{"j/k", "pick"}, {"r", "reply"}, {"x", "resolve"}, {"+", "react"}, {"enter", "go to code"}, {"[ ]", "views"}, {"esc", "back"}}
 	case m.tab == tabPRs && m.focus == 1:
 		h = [][2]string{{"j/k", "scroll"}, {"[ ]", "views"}, {"esc", "back"}, {"enter", "full screen"}, {"m", "merge"}, {"R", "review"}, {"C", "comment"}, {"?", "keys"}}
 	case m.tab == tabPRs:
@@ -1815,6 +1900,8 @@ func (m *model) hintBar(y int) string {
 		h = [][2]string{{"j/k", "move"}, {"enter", "logs"}, {"R", "re-run"}, {"x", "cancel"}, {"w", "start workflow"}, {"f", "failed/running"}, {"/", "find"}, {"ctrl+p", "commands"}, {"?", "keys"}}
 	case m.tab != tabRepos:
 		h = [][2]string{{"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
+	case m.ex != nil && m.ex.sec == secChanges && m.focus == 0:
+		h = [][2]string{{"space", "stage"}, {"a", "all"}, {"d", "discard"}, {"c", "commit"}, {"A", "amend"}, {"p", "pull"}, {"P", "push"}, {"f", "fetch"}, {"e", "nvim"}, {"esc", "back"}, {"[ ]", "section"}}
 	case m.ex != nil && m.ex.sec == secPRs && m.focus == 0:
 		h = [][2]string{{"j/k", "move"}, {"enter", "read"}, {"{ }", "views"}, {"m", "merge"}, {"R", "review"}, {"C", "comment"}, {"K", "check out"}, {"N", "new"}, {"esc", "back"}, {"[ ]", "section"}}
 	case m.ex != nil && m.ex.sec == secPRs && m.focus == 1:
@@ -1893,7 +1980,7 @@ func helpLines(w int) []string {
 		sec("Selected repo / file"),
 		row("e", "open in Nvim (the highlighted file if it's on this PC)"),
 		row("L", "open lazygit: commit, push, pull"),
-		row("P", "pull: get the new commits from GitHub into your copy"),
+		row("p  P", "pull / push (like lazygit)"),
 		row("o", "open what you see in the browser"),
 		row("y", "copy its link"),
 		row("c", "clone into "+cloneRoot),
@@ -1904,6 +1991,22 @@ func helpLines(w int) []string {
 		row("●", "files changed but not committed"),
 		row("↑2", "2 commits not pushed to GitHub"),
 		row("↓3  ↓", "GitHub has 3 (or some) new commits: pull in lazygit"),
+		"",
+		sec("Changes — a repo on this PC (the keys lazygit uses)"),
+		row("space", "stage / unstage the file"),
+		row("a", "stage / unstage everything"),
+		row("d", "discard the file's changes (asks first)"),
+		row("c  C", "commit: message here / in Nvim (offers to stage all if nothing is)"),
+		row("A", "amend the last commit"),
+		row("p  P  f", "pull / push / fetch"),
+		row("e", "open the file in Nvim"),
+		"",
+		sec("PR comments — the Comments view"),
+		row("j / k", "pick a comment (right panel focused: tab or a click)"),
+		row("r", "reply (in the thread on code, or quoting the comment)"),
+		row("x", "resolve / unresolve a comment on code"),
+		row("+", "react 👍 ❤️ 🎉 …"),
+		row("enter", "jump to that file in the Files view"),
 		"",
 		sec("Pull requests — the PRs tab, or a repo's PRs section"),
 		row("[  ]", "views: Overview, Commits, Checks, Files (or click them)"),

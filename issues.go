@@ -58,11 +58,14 @@ func (i *Issue) who() string {
 }
 
 type IssueComment struct {
+	ID     string `json:"id"`
+	URL    string `json:"url"`
 	Author *struct {
 		Login string `json:"login"`
 	} `json:"author"`
-	Body    string    `json:"body"`
-	Created time.Time `json:"createdAt"`
+	Body      string     `json:"body"`
+	Created   time.Time  `json:"createdAt"`
+	Reactions []Reaction `json:"reactionGroups"`
 }
 
 func (c *IssueComment) who() string {

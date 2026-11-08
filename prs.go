@@ -56,7 +56,10 @@ type prList struct {
 }
 
 type PRReview struct {
-	Author *struct {
+	ID        string     `json:"id"`
+	URL       string     `json:"url"`
+	Reactions []Reaction `json:"reactionGroups"`
+	Author    *struct {
 		Login string `json:"login"`
 	} `json:"author"`
 	State     string    `json:"state"` // APPROVED / CHANGES_REQUESTED / COMMENTED / DISMISSED
@@ -111,6 +114,7 @@ func (c *Check) title() string {
 
 // a conversation on a line of code (left in a review)
 type ReviewThread struct {
+	ID         string `json:"id"`
 	Path       string `json:"path"`
 	Line       int    `json:"line"`
 	IsResolved bool   `json:"isResolved"`
@@ -120,9 +124,12 @@ type ReviewThread struct {
 			Author *struct {
 				Login string `json:"login"`
 			} `json:"author"`
-			Body     string    `json:"body"`
-			Created  time.Time `json:"createdAt"`
-			DiffHunk string    `json:"diffHunk"`
+			Body      string     `json:"body"`
+			Created   time.Time  `json:"createdAt"`
+			DiffHunk  string     `json:"diffHunk"`
+			ID        string     `json:"id"`
+			URL       string     `json:"url"`
+			Reactions []Reaction `json:"reactionGroups"`
 		} `json:"nodes"`
 	} `json:"comments"`
 }
@@ -184,9 +191,9 @@ func fetchPRs(q string) func() func(*model) {
 const prDetailQuery = `query($owner: String!, $name: String!, $n: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $n) {
-      comments(first: 100) { nodes { author { login } body createdAt } }
-      reviews(last: 50) { nodes { author { login } state body submittedAt } }
-      reviewThreads(first: 60) { nodes { path line isResolved isOutdated comments(first: 30) { nodes { author { login } body createdAt diffHunk } } } }
+      comments(first: 100) { nodes { id url author { login } body createdAt reactionGroups { content viewerHasReacted reactors { totalCount } } } }
+      reviews(last: 50) { nodes { id url author { login } state body submittedAt reactionGroups { content viewerHasReacted reactors { totalCount } } } }
+      reviewThreads(first: 60) { nodes { id path line isResolved isOutdated comments(first: 30) { nodes { id url author { login } body createdAt diffHunk reactionGroups { content viewerHasReacted reactors { totalCount } } } } } }
       commits(first: 100) { nodes { commit { oid abbreviatedOid messageHeadline messageBody committedDate additions deletions changedFilesIfAvailable author { name user { login } } } } }
       last: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 80) { nodes {
         __typename
@@ -266,11 +273,12 @@ type prState struct {
 	closed    bool
 	query     string
 	filtering bool
-	view      int // Overview, Commits, Checks, Files
+	view      int // Overview, Comments, Commits, Checks, Files
+	cmt       int // the picked card in Comments
 }
 
 var prScopes = []string{"Your repos", "Review requests", "Created", "Involved"}
-var prViews = []string{"Overview", "Commits", "Checks", "Files"}
+var prViews = []string{"Overview", "Comments", "Commits", "Checks", "Files"}
 
 func (m *model) prStateQ() string {
 	if m.prs.closed {
@@ -379,6 +387,7 @@ func (m *model) prMove(d int) tea.Cmd {
 	if m.prs.cur == old {
 		return nil
 	}
+	m.prs.cmt = 0
 	return m.prSelected()
 }
 
@@ -392,6 +401,9 @@ func (m *model) prSetView(v int) tea.Cmd {
 
 // PR keys shared by the PRs tab and a repo's PRs section
 func (m *model) prKeys(s string) (tea.Cmd, bool) {
+	if cmd, ok := m.cardKey(s); ok {
+		return cmd, true
+	}
 	switch s {
 	case "m":
 		return m.prMerge(), true
@@ -751,13 +763,13 @@ func (m *model) prRead() tea.Cmd {
 	sub := p.repo() + " · " + p.Head + " → " + p.Base
 	title := fmt.Sprintf("#%d %s", p.Number, p.Title)
 	switch m.prs.view {
-	case 0:
+	case pvOverview, pvComments:
 		m.openReader(&reader{title: title, sub: sub, icon: icPR,
 			mdSrc: func(m *model) (string, bool) { return prConversationMD(&pr, m.prDetails[k]), true }})
-	case 1:
+	case pvCommits:
 		m.openReader(&reader{title: title + " · commits", sub: sub, icon: icCommit,
 			content: func(m *model, w int) []string { return m.prCommitsLines(&pr, w) }})
-	case 2:
+	case pvChecks:
 		// a failing (or the first) GitHub Actions check: open its logs
 		if d := m.prDetails[k]; d != nil {
 			var pick *Check
@@ -789,7 +801,7 @@ func (m *model) prRead() tea.Cmd {
 		}
 		m.openReader(&reader{title: title + " · checks", sub: sub, icon: icActions,
 			content: func(m *model, w int) []string { return m.prChecksLines(&pr, w) }})
-	case 3:
+	case pvFiles:
 		m.openReader(&reader{title: title + " · files", sub: sub, icon: icFile,
 			docFn: func(m *model, w int) (mdDoc, bool) {
 				f := m.prFilesMap[k]
@@ -965,14 +977,15 @@ func (m *model) prRow(p *PR, w int, sel, showRepo bool) string {
 // prTitle draws the view chips (Overview  Commits 3  Checks ✓  Files 12) for the panel's top border
 func (m *model) prTitle(p *PR, x0, y0 int) string {
 	d := m.prDetails[prKey(p)]
-	labels := []string{"Overview", "Commits", "Checks", "Files"}
+	labels := []string{"Overview", "Comments", "Commits", "Checks", "Files"}
 	if d != nil {
-		labels[1] += fmt.Sprintf(" %d", len(d.commits))
+		labels[pvComments] += fmt.Sprintf(" %d", len(m.prCards(p)))
+		labels[pvCommits] += fmt.Sprintf(" %d", len(d.commits))
 	}
 	if cm := p.checks(); cm != "" {
-		labels[2] += " " + map[string]string{"SUCCESS": "✓", "FAILURE": "✗", "ERROR": "✗", "PENDING": "●", "EXPECTED": "●"}[cm]
+		labels[pvChecks] += " " + map[string]string{"SUCCESS": "✓", "FAILURE": "✗", "ERROR": "✗", "PENDING": "●", "EXPECTED": "●"}[cm]
 	}
-	labels[3] += fmt.Sprintf(" %d", p.ChangedFiles)
+	labels[pvFiles] += fmt.Sprintf(" %d", p.ChangedFiles)
 	title := ""
 	x := x0 + 3
 	for i, l := range labels {
@@ -993,11 +1006,13 @@ func (m *model) prTitle(p *PR, x0, y0 int) string {
 
 func (m *model) prPreview(p *PR, w int) []string {
 	switch m.prs.view {
-	case 1:
+	case pvComments:
+		return m.prCommentsLines(p, w)
+	case pvCommits:
 		return m.prCommitsLines(p, w)
-	case 2:
+	case pvChecks:
 		return m.prChecksLines(p, w)
-	case 3:
+	case pvFiles:
 		f := m.prFilesMap[prKey(p)]
 		switch {
 		case f == nil:
@@ -1063,10 +1078,28 @@ func (m *model) prOverview(p *PR, w int) []string {
 		h = append(h, [2]string{"m", "merge"}, [2]string{"R", "review"})
 	}
 	h = append(h, [2]string{"C", "comment"}, [2]string{"K", "check out"})
-	out = append(out, "", hints(h), sepLine(w), "")
-	d := m.prDetails[prKey(p)]
-	md := prConversationMD(p, d)
-	return append(out, m.cachedLines(fmt.Sprintf("prov:%s:%d:%d", prKey(p), len(md), w), func() []string { return renderMarkdown(md, w) })...)
+	out = append(out, "", hints(h))
+	if d := m.prDetails[prKey(p)]; d != nil {
+		if n := len(m.prCards(p)); n > 0 {
+			open := 0
+			for _, t := range d.threads {
+				if !t.IsResolved {
+					open++
+				}
+			}
+			line := fmt.Sprintf("%s %d %s", icComment, n, plural(n, "comment", "comments"))
+			if open > 0 {
+				line += fmt.Sprintf(", %d open on code", open)
+			}
+			out = append(out, fg(cHint).Render(line)+fg(cMut).Render("  ·  ]  to read and reply"))
+		}
+	}
+	out = append(out, sepLine(w), "")
+	body := strings.TrimSpace(p.Body)
+	if body == "" {
+		return append(out, fg(cMut).Render("No description."))
+	}
+	return append(out, m.cachedLines(fmt.Sprintf("prov:%s:%d:%d", prKey(p), len(body), w), func() []string { return renderMarkdown(body, w) })...)
 }
 
 func (m *model) prCommitsLines(p *PR, w int) []string {

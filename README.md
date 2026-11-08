@@ -10,12 +10,17 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | 1 | Base: layout, tabs, mouse, command palette, bottom-bar prompts, Repos list + README | done |
 | 2 | Repo explorer: code, commits, branches, Nvim, lazygit, local badges | done |
 | 3 | Markdown reader: Nvim-style markdown, full-screen reader, Contents, `termgit file.md` | done |
-| 4 | Actions + Releases: CI runs, logs, re-run, cancel, start workflows, releases | done |
-| 5 | Issues: read, comment, create, close / reopen, labels, edit in Nvim | done |
-| 6 | PRs: overview, commits, checks, files, merge, review, comment, check out, create | done |
-| 7 | Home + Inbox | next |
-| 8 | Explore + repo management | |
-| 9 | Polish: settings, help page, tests | |
+| 4 | Actions + Releases | done |
+| 5 | Issues | done |
+| 6 | Pull requests | done |
+| 7 | Local Git 1: Changes (stage, commit, amend, pull, push, fetch) + PR Comments (reply, resolve, react) | done |
+| 8 | Local Git 2: branches, stash, graph, cherry-pick, revert, reset, tags, line staging | next |
+| 9 | Local Git 3: conflicts, interactive rebase, remotes, worktrees | |
+| 10 | Home + Inbox | |
+| 11 | Explore + repo management | |
+| 12 | Polish: settings, help page, tests | |
+
+TermGit aims to do everything lazygit does; lazygit stays one key away (`L`).
 
 ## Keys
 
@@ -30,7 +35,7 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | `[` / `]` | inside a repo: Code, Commits, Branches |
 | `esc` / `h` / backspace | back: up a folder, then to the repo list |
 | `e` / `L` | open in Nvim / lazygit (asks to clone first if needed) |
-| `P` | pull: bring GitHub's new commits into your copy (fast-forward only, never merges) |
+| `p` / `P` | pull (fast-forward only, never merges) / push |
 | `/` | filter repos; inside a repo: find a file, commit or branch |
 | `ctrl+d` / `ctrl+u` | scroll the right panel |
 | `o` / `y` / `c` / `r` | browser / copy link (of what's on screen) / clone / refresh |
@@ -38,12 +43,18 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | `esc` | back |
 | `q` | quit |
 
+## Changes (local Git)
+
+Open a repo that's on this PC, then the **Changes** section (`]`): every changed file, its diff on the right.
+Same keys as lazygit: `space` stage / unstage, `a` all, `d` discard, `c` commit (`C` in Nvim), `A` amend,
+`p` pull, `P` push (offers force-with-lease if GitHub has commits you don't), `f` fetch, `e` open in Nvim.
+
 ## Pull requests
 
 - **PRs tab** (`4`): PRs in your repos. `f` switches Your repos / Review requests / Created / Involved, `s` open / closed+merged.
 - Inside a repo: the **PRs** section.
-- Overview shows the whole conversation: comments, reviews, and comments left on lines of code (with that code).
-- Views on the right: Overview, Commits, Checks, Files: `[` / `]` (in a repo `{` / `}`), or click them.
+- **Comments** view: every comment, review and comment on code as a card. Focus the panel (`tab`), `j` / `k` pick one, `r` reply, `x` resolve, `+` react, `enter` jump to the code.
+- Views on the right: Overview, Comments, Commits, Checks, Files: `[` / `]` (in a repo `{` / `}`), or click them.
 - `enter` shows the view full screen (Files: every file is a heading; Checks: the failing check's logs).
 - `m` merge (squash / merge commit / rebase, keep or delete the branch), `R` review, `C` comment, `x` close / reopen, `K` check out locally, `N` new PR.
 
