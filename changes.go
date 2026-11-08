@@ -31,6 +31,7 @@ func (c *change) conflict() bool {
 
 type changeList struct {
 	items []change
+	state string // merge / rebase / cherry-pick / revert in progress
 	err   string
 }
 
@@ -71,6 +72,7 @@ func fetchChanges(dir string) func() func(*model) {
 			cl.items = append(cl.items, c)
 		}
 		sort.Slice(cl.items, func(i, j int) bool { return strings.ToLower(cl.items[i].path) < strings.ToLower(cl.items[j].path) })
+		cl.state = gitState(dir)
 		return func(m *model) { m.changes[dir] = cl }
 	}
 }
@@ -602,7 +604,7 @@ func (m *model) chButtons() []button {
 		}
 		b = append(b, button{icClose + " Discard", "d", "discard"})
 	}
-	if st := gitState(m.chDir()); st != "" {
+	if st := m.chState(); st != "" {
 		b = append(b, button{icCheck + " Continue " + st, "ctrl+p", "gitcontinue"}, button{icClose + " Abort", "ctrl+p", "gitabort"})
 	}
 	b = append(b, button{"Stage all", "a", "stageall"}, button{icCommit + " Commit", "c", "commit"},
@@ -618,4 +620,12 @@ func (m *model) firstDiffLine() int {
 		}
 	}
 	return 0
+}
+
+// what git is in the middle of, as read with the last Changes refresh
+func (m *model) chState() string {
+	if cl := m.changes[m.chDir()]; cl != nil {
+		return cl.state
+	}
+	return ""
 }

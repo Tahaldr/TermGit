@@ -341,7 +341,7 @@ func (m *model) layout() (lw, ph int) {
 	if lw > 64 {
 		lw = 64
 	}
-	ph = m.h - 4 - m.palRows()
+	ph = m.h - 3 - m.hintRows() - m.palRows()
 	return
 }
 
@@ -1496,7 +1496,9 @@ func (m *model) render() string {
 	if m.palette {
 		lines = append(lines, m.paletteBox(2+ph)...)
 	}
-	lines = append(lines, m.buttonsBar(m.h-2), m.hintBar(m.h-1))
+	nh := m.hintRows()
+	lines = append(lines, m.buttonsBar(m.h-1-nh))
+	lines = append(lines, m.hintLines(m.h-nh)...)
 	return strings.Join(lines, "\n")
 }
 
@@ -1898,83 +1900,7 @@ func (m *model) hintBar(y int) string {
 		return " " + fg(cAcc).Render(":") + " " + fg(cTxt).Render(m.palQ) + fg(cAcc).Render("▏") + "   " +
 			hints([][2]string{{"↑↓", "choose"}, {"enter", "run"}, {"esc", "close"}})
 	}
-	if m.filtering {
-		return " " + hints([][2]string{{"type", "to filter"}, {"↑↓", "move"}, {"enter", "keep filter"}, {"esc", "clear"}})
-	}
-	var h [][2]string
-	switch {
-	case m.tab == tabPRs && m.prs.filtering:
-		h = [][2]string{{"type", "to find"}, {"↑↓", "move"}, {"enter", "keep"}, {"esc", "clear"}}
-	case (m.tab == tabPRs || m.ex != nil && m.ex.sec == secPRs) && m.focus == 1 && m.prs.view == pvComments:
-		h = [][2]string{{"j/k", "pick"}, {"r", "reply"}, {"x", "resolve"}, {"+", "react"}, {"enter", "go to code"}, {"[ ]", "views"}, {"esc", "back"}}
-	case m.tab == tabPRs && m.focus == 1:
-		h = [][2]string{{"j/k", "scroll"}, {"[ ]", "views"}, {"esc", "back"}, {"enter", "full screen"}, {"m", "merge"}, {"R", "review"}, {"C", "comment"}, {"?", "keys"}}
-	case m.tab == tabPRs:
-		h = [][2]string{{"j/k", "move"}, {"enter", "read"}, {"[ ]", "views"}, {"m", "merge"}, {"R", "review"}, {"C", "comment"}, {"K", "check out"}, {"N", "new"}, {"s", "open/closed"}, {"f", "scope"}, {"?", "keys"}}
-	case m.tab == tabIssues && m.iss.filtering:
-		h = [][2]string{{"type", "to find"}, {"↑↓", "move"}, {"enter", "keep"}, {"esc", "clear"}}
-	case m.tab == tabIssues && m.focus == 1:
-		h = [][2]string{{"j/k", "scroll"}, {"esc", "back"}, {"enter", "read"}, {"C", "comment"}, {"x", "close/reopen"}, {"t", "labels"}, {"?", "keys"}}
-	case m.tab == tabIssues:
-		h = [][2]string{{"j/k", "move"}, {"enter", "read"}, {"C", "comment"}, {"N", "new"}, {"x", "close/reopen"}, {"t", "labels"}, {"s", "open/closed"}, {"f", "scope"}, {"/", "find"}, {"?", "keys"}}
-	case m.tab == tabActions && m.act.filtering:
-		h = [][2]string{{"type", "to find"}, {"↑↓", "move"}, {"enter", "keep"}, {"esc", "clear"}}
-	case m.tab == tabActions:
-		h = [][2]string{{"j/k", "move"}, {"enter", "logs"}, {"R", "re-run"}, {"x", "cancel"}, {"w", "start workflow"}, {"f", "failed/running"}, {"/", "find"}, {"ctrl+p", "commands"}, {"?", "keys"}}
-	case m.tab != tabRepos:
-		h = [][2]string{{"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
-	case m.ex != nil && m.ex.sec == secChanges && m.focus == 1 && m.chSel() != nil && !m.chSel().conflict():
-		h = [][2]string{{"j/k", "pick a line"}, {"space", "stage / unstage line"}, {"a", "whole hunk"}, {"esc", "back"}, {"?", "keys"}}
-	case m.ex != nil && m.ex.sec == secChanges && m.focus == 0 && m.selStash() != nil:
-		h = [][2]string{{"enter", "pop / apply / drop"}, {"d", "drop"}, {"s", "stash"}, {"esc", "back"}, {"[ ]", "section"}}
-	case m.ex != nil && m.ex.sec == secBranches && m.focus == 0 && m.isLocal():
-		h = [][2]string{{"space", "switch"}, {"enter", "commits"}, {"n", "new"}, {"M", "merge"}, {"B", "rebase"}, {"R", "rename"}, {"D", "delete"}, {"P", "push tag"}, {"b", "code"}, {"esc", "back"}}
-	case m.ex != nil && m.ex.sec == secCommits && m.ex.plan != nil:
-		h = [][2]string{{"p", "pick"}, {"s", "squash"}, {"f", "fixup"}, {"r", "reword"}, {"d", "drop"}, {"J/K", "move"}, {"enter", "run"}, {"esc", "cancel"}}
-	case m.ex != nil && m.ex.sec == secChanges && m.chSel() != nil && m.chSel().conflict() && m.focus == 1:
-		h = [][2]string{{"j/k", "next conflict"}, {"o", "keep top"}, {"t", "keep bottom"}, {"b", "keep both"}, {"e", "nvim"}, {"esc", "back"}}
-	case m.ex != nil && m.ex.sec == secChanges && m.chSel() != nil && m.chSel().conflict():
-		h = [][2]string{{"enter", "fix conflicts"}, {"O", "keep all top"}, {"T", "keep all bottom"}, {"e", "nvim"}, {"ctrl+p", "continue / abort"}}
-	case m.ex != nil && m.ex.sec == secCommits && m.focus == 0 && m.isLocal():
-		h = [][2]string{{"enter", "changes"}, {"C", "cherry-pick"}, {"t", "revert"}, {"X", "reset"}, {"T", "tag"}, {"y", "copy id"}, {"space", "check out"}, {"esc", "back"}}
-	case m.ex != nil && m.ex.sec == secChanges && m.focus == 0:
-		h = [][2]string{{"space", "stage"}, {"a", "all"}, {"enter", "pick lines"}, {"d", "discard"}, {"c", "commit"}, {"s", "stash"}, {"p", "pull"}, {"P", "push"}, {"esc", "back"}, {"[ ]", "section"}}
-	case m.ex != nil && m.ex.sec == secPRs && m.focus == 0:
-		h = [][2]string{{"j/k", "move"}, {"enter", "read"}, {"{ }", "views"}, {"m", "merge"}, {"R", "review"}, {"C", "comment"}, {"K", "check out"}, {"N", "new"}, {"esc", "back"}, {"[ ]", "section"}}
-	case m.ex != nil && m.ex.sec == secPRs && m.focus == 1:
-		h = [][2]string{{"j/k", "scroll"}, {"[ ]", "views"}, {"esc", "back"}, {"enter", "full screen"}, {"m", "merge"}, {"R", "review"}, {"?", "keys"}}
-	case m.ex != nil && m.ex.sec == secIssues && m.focus == 0:
-		h = [][2]string{{"j/k", "move"}, {"enter", "read"}, {"C", "comment"}, {"N", "new"}, {"x", "close/reopen"}, {"t", "labels"}, {"s", "open/closed"}, {"esc", "back"}, {"[ ]", "section"}}
-	case m.ex != nil && m.ex.sec == secActions && m.focus == 0:
-		h = [][2]string{{"j/k", "move"}, {"enter", "logs"}, {"R", "re-run"}, {"x", "cancel"}, {"w", "start workflow"}, {"esc", "back"}, {"[ ]", "section"}, {"?", "keys"}}
-	case m.ex != nil && m.ex.sec == secReleases && m.focus == 0:
-		h = [][2]string{{"j/k", "move"}, {"enter", "notes"}, {"d", "download"}, {"N", "new release"}, {"esc", "back"}, {"[ ]", "section"}, {"?", "keys"}}
-	case m.ex != nil && m.focus == 1:
-		h = [][2]string{{"j/k", "scroll"}, {"ctrl+d/u", "page"}, {"esc", "back"}, {"[ ]", "section"}, {"v", "full screen"}, {"e", "nvim"}, {"L", "lazygit"}, {"o", "browser"}, {"ctrl+p", "commands"}, {"?", "keys"}}
-	case m.ex != nil:
-		h = [][2]string{{"j/k", "move"}, {"enter", "open"}, {"esc", "back"}, {"[ ]", "section"}, {"/", "find"}, {"v", "full screen"}, {"e", "nvim"}, {"L", "lazygit"}, {"ctrl+p", "commands"}, {"?", "keys"}}
-	case m.focus == 1:
-		h = [][2]string{{"j/k", "scroll"}, {"ctrl+d/u", "page"}, {"g/G", "top/end"}, {"esc", "back to list"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
-	default:
-		h = [][2]string{{"j/k", "move"}, {"enter", "open repo"}, {"v", "read README"}, {"/", "filter"}, {"e", "nvim"}, {"L", "lazygit"}, {"1-7", "tabs"}, {"ctrl+p", "commands"}, {"?", "keys"}, {"q", "quit"}}
-	}
-	out := " " + hints(h)
-	// the "?" and "ctrl+p" hints are clickable too
-	plain := " "
-	for i, p := range h {
-		if i > 0 {
-			plain += "  ·  "
-		}
-		start := width(plain)
-		plain += p[0] + " " + p[1]
-		switch p[0] {
-		case "?":
-			m.addZone(start, y, width(plain)-1, y, "hint-help", 0)
-		case "ctrl+p":
-			m.addZone(start, y, width(plain)-1, y, "hint-pal", 0)
-		}
-	}
-	return trunc(out, m.w)
+	return ""
 }
 
 func helpLines(w int) []string {

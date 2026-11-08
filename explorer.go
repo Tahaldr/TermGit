@@ -313,13 +313,13 @@ func (m *model) exLoad() tea.Cmd {
 		cmds = append(cmds, m.load("tree:"+m.treeKey(), false, fetchTree(nwo, ex.ref, oid)))
 	case secCommits:
 		if dir := m.localPath(&ex.repo); dir != "" {
-			cmds = append(cmds, m.load("llog:"+dir+"|"+ex.logRef, false, fetchLog(dir, ex.logRef)))
+			cmds = append(cmds, m.load("llog:"+dir+"|"+ex.logRef, false, fetchLog(dir, ex.logRef)), m.load("changes:"+dir, false, fetchChanges(dir)))
 		} else {
 			cmds = append(cmds, m.load("commits:"+m.treeKey(), false, fetchCommits(nwo, ex.ref)))
 		}
 	case secBranches:
 		if dir := m.localPath(&ex.repo); dir != "" {
-			cmds = append(cmds, m.load("lbranches:"+dir, false, fetchLBranches(dir)))
+			cmds = append(cmds, m.load("lbranches:"+dir, false, fetchLBranches(dir)), m.load("changes:"+dir, false, fetchChanges(dir)))
 		} else {
 			cmds = append(cmds, m.load("branches:"+nwo, false, fetchBranches(nwo, ex.repo.Branch())))
 		}
@@ -981,7 +981,7 @@ func (m *model) exListBox(w, h, y0 int) []string {
 		}
 		note = icBranch + " " + ref + " · on this PC  " + note
 	}
-	if st := gitState(m.localPath(&ex.repo)); st != "" && m.localPath(&ex.repo) != "" && (ex.sec == secChanges || ex.sec == secBranches || ex.sec == secCommits) {
+	if st := m.chState(); st != "" && (ex.sec == secChanges || ex.sec == secBranches || ex.sec == secCommits) {
 		note = strings.ToUpper(st) + " in progress · ctrl+p Abort/Continue  " + note
 	}
 	if td := m.trees[m.treeKey()]; ex.sec == secCode && td != nil && td.truncated {
