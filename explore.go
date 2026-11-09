@@ -17,11 +17,14 @@ const repoFields = `id nameWithOwner name description isPrivate isFork isArchive
         defaultBranchRef { name target { oid } }
         primaryLanguage { name color }`
 
-var expModes = []string{"Starred", "Repos", "Issues", "Code"}
+var expModes = []string{"Starred", "Repos", "Issues", "Code", "Users"}
+
+const modeUsers = 4
 
 type expState struct {
 	mode     int
-	query    [4]string
+	query    [5]string
+	user     string // Users: the profile being looked at
 	cur, off int
 	jumped   string // the code result we already scrolled to its first match
 }
@@ -111,9 +114,11 @@ func urlQuery(q string) string {
 // ---- which items ----
 
 type expItem struct {
-	repo  *Repo
-	issue *Issue
-	code  *codeHit
+	repo    *Repo
+	issue   *Issue
+	code    *codeHit
+	user    *userHit
+	profile *Profile // the first row of a profile: the person themselves
 }
 
 func (m *model) expIssueQuery() string {
@@ -149,6 +154,21 @@ func (m *model) expItems() []expItem {
 				out = append(out, expItem{code: &cs.items[i]})
 			}
 		}
+	case modeUsers:
+		if m.exp.user != "" {
+			if p := m.profiles[strings.ToLower(m.exp.user)]; p != nil {
+				out = append(out, expItem{profile: p})
+				for i := range p.Repositories.Nodes {
+					out = append(out, expItem{repo: &p.Repositories.Nodes[i]})
+				}
+			}
+			return out
+		}
+		if us := m.expUsers[m.exp.query[modeUsers]]; us != nil {
+			for i := range us.items {
+				out = append(out, expItem{user: &us.items[i]})
+			}
+		}
 	}
 	return out
 }
@@ -180,6 +200,12 @@ func (m *model) expLoad() tea.Cmd {
 		if q != "" {
 			cmds = append(cmds, m.load("codesearch:"+q, false, fetchCodeSearch(q)))
 		}
+	case modeUsers:
+		if m.exp.user != "" {
+			cmds = append(cmds, m.load("profile:"+strings.ToLower(m.exp.user), false, fetchProfile(m.exp.user)))
+		} else if q != "" {
+			cmds = append(cmds, m.load("usersearch:"+q, false, fetchUserSearch(q)))
+		}
 	}
 	if it, ok := m.expSel(); ok {
 		switch {
@@ -193,6 +219,8 @@ func (m *model) expLoad() tea.Cmd {
 			cmds = append(cmds, m.loadComments(it.issue, true))
 		case it.code != nil:
 			cmds = append(cmds, m.load("blob:"+it.code.Sha, true, fetchBlob(it.code.Repo.FullName, it.code.Sha)))
+		case it.user != nil:
+			cmds = append(cmds, m.load("profile:"+strings.ToLower(it.user.Login), true, fetchProfile(it.user.Login)))
 		}
 	}
 	return tea.Batch(cmds...)
@@ -237,7 +265,10 @@ func (m *model) expAsk() tea.Cmd {
 		m.exp.mode = 1
 	}
 	mode := m.exp.mode
-	label := map[int]string{1: "Search GitHub repos:", 2: "Search GitHub issues:", 3: "Search code on GitHub:"}[mode]
+	label := map[int]string{1: "Search GitHub repos:", 2: "Search GitHub issues:", 3: "Search code on GitHub:", modeUsers: "Search GitHub users:"}[mode]
+	if mode == modeUsers {
+		m.exp.user = ""
+	}
 	m.prompt = &prompt{label: label, text: m.exp.query[mode], done: func(m *model, q string) tea.Cmd {
 		if q == "" {
 			return nil
@@ -270,6 +301,12 @@ func (m *model) expOpen() tea.Cmd {
 		return nil
 	}
 	switch {
+	case it.user != nil:
+		m.exp.user, m.exp.cur, m.exp.off = it.user.Login, 0, 0
+		return m.expSelected()
+	case it.profile != nil:
+		m.focus = 1
+		return nil
 	case it.repo != nil:
 		return m.openRepoObj(*it.repo)
 	case it.issue != nil:
@@ -381,7 +418,17 @@ func (m *model) expKey(s string) tea.Cmd {
 	case "s":
 		return m.actStar(it.repo)
 	case "F":
+		if it.profile != nil {
+			return m.actFollow(it.profile)
+		}
+		if it.user != nil {
+			return m.actFollow(m.profiles[strings.ToLower(it.user.Login)])
+		}
 		return m.actFork(it.repo)
+	case "u":
+		if it.repo != nil {
+			return m.openProfile(strings.SplitN(it.repo.NameWithOwner, "/", 2)[0])
+		}
 	case "c":
 		if it.repo != nil {
 			return m.cloneRepo(it.repo)
@@ -563,6 +610,9 @@ func (m *model) expListBox(w, h, y0 int) []string {
 		if q == "" {
 			line += fg(cMut).Render("press / to search GitHub")
 		}
+		if m.exp.mode == modeUsers && m.exp.user != "" {
+			line = fg(cMut).Render("← ") + fg(cAcc).Render(m.exp.user) + fg(cMut).Render("  (esc: back to the results)")
+		}
 		body = append(body, line)
 		m.addZone(1, y0+1, w-2, y0+1, "expsearch", 0)
 	}
@@ -590,6 +640,20 @@ func (m *model) expListBox(w, h, y0 int) []string {
 		loading = cs == nil && q != ""
 		if cs != nil {
 			errText = cs.err
+		}
+	case modeUsers:
+		if m.exp.user != "" {
+			p := m.profiles[strings.ToLower(m.exp.user)]
+			loading = p == nil
+			if p != nil {
+				errText = p.err
+			}
+		} else {
+			us := m.expUsers[q]
+			loading = us == nil && q != ""
+			if us != nil {
+				errText = us.err
+			}
 		}
 	}
 	switch {
@@ -622,6 +686,14 @@ func (m *model) expListBox(w, h, y0 int) []string {
 			body = append(body, m.issueRow(it.issue, inner, sel, true))
 		case it.code != nil:
 			body = append(body, m.codeRow(it.code, inner, sel))
+		case it.user != nil:
+			body = append(body, m.userRow(it.user, inner, sel))
+		case it.profile != nil:
+			st := fg(cAcc).Bold(true)
+			if sel {
+				st = st.Background(cDim)
+			}
+			body = append(body, pad(st.Render(icUser+" "+it.profile.Login+"'s profile"), inner))
 		}
 		y := rowY + (i - m.exp.off)
 		m.addZone(1, y, w-2, y, "exprow", i)
@@ -653,6 +725,10 @@ func (m *model) expPreview(w int) (string, []string) {
 		}
 		h := hints([][2]string{{"enter", "open"}, {"s", star}, {"F", "fork"}, {"c", "clone"}, {"v", "read README"}})
 		return "Repo", append([]string{h, ""}, out...)
+	case it.user != nil:
+		return "Profile", append([]string{hints([][2]string{{"enter", "their profile and repos"}, {"o", "browser"}}), ""}, m.profileLines(m.profiles[strings.ToLower(it.user.Login)], w)...)
+	case it.profile != nil:
+		return "Profile", m.profileLines(it.profile, w)
 	case it.issue != nil:
 		return fmt.Sprintf("Issue #%d", it.issue.Number), m.issuePreview(it.issue, w)
 	case it.code != nil:
@@ -700,4 +776,22 @@ func (m *model) expPreview(w int) (string, []string) {
 		return "Code", append(out, marked...)
 	}
 	return "Explore", nil
+}
+
+// esc in Explore: one step back (profile → results → clear search → Starred)
+func (m *model) expBack() tea.Cmd {
+	switch {
+	case m.focus == 1:
+		m.focus = 0
+		return nil
+	case m.exp.mode == modeUsers && m.exp.user != "":
+		m.exp.user, m.exp.cur, m.exp.off = "", 0, 0
+	case m.exp.query[m.exp.mode] != "":
+		m.exp.query[m.exp.mode], m.exp.cur, m.exp.off = "", 0, 0
+	case m.exp.mode != 0:
+		m.exp.mode, m.exp.cur, m.exp.off = 0, 0, 0
+	default:
+		return nil
+	}
+	return m.expSelected()
 }

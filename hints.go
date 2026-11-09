@@ -40,13 +40,20 @@ func (m *model) hintItems() []hint {
 		}
 		h = append(h, hint{"o", "browser"}, hint{"r", "refresh"}, hint{"1-7", "tabs"})
 	case m.tab == tabExplore:
-		h = []hint{{"/", "search GitHub"}, {"f", "repos/issues/code/starred"}, {"j/k", "move"}, {"enter", "open"}}
-		if it, ok := m.expSel(); ok && it.repo != nil {
+		h = []hint{{"/", "search GitHub"}, {"f", "starred/repos/issues/code/users"}, {"j/k", "move"}, {"enter", "open"}}
+		it, ok := m.expSel()
+		switch {
+		case ok && it.repo != nil:
 			star := "star"
 			if it.repo.ViewerHasStarred {
 				star = "unstar"
 			}
-			h = append(h, hint{"s", star}, hint{"F", "fork"}, hint{"c", "clone"}, hint{"v", "README"})
+			h = append(h, hint{"s", star}, hint{"F", "fork"}, hint{"c", "clone"}, hint{"u", "owner's profile"}, hint{"v", "README"})
+		case ok && (it.user != nil || it.profile != nil):
+			h = append(h, hint{"F", "follow / unfollow"})
+		}
+		if m.exp.user != "" || m.exp.query[m.exp.mode] != "" || m.exp.mode != 0 {
+			h = append(h, hint{"esc", "back"})
 		}
 		h = append(h, hint{"o", "browser"}, hint{"y", "copy link"}, hint{"1-7", "tabs"})
 	case m.tab == tabInbox && m.inbox.filtering:

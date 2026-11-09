@@ -119,9 +119,13 @@ type model struct {
 	lastIdx   int
 
 	// explore (batch 11)
-	exp      expState
-	expRepos map[string]*repoSearch
-	expCode  map[string]*codeSearch
+	linkZones []linkZone // ctrl+click links on the current screen
+	homeLeft  bool       // a followed link opened a page in TermGit (not the browser)
+	expUsers  map[string]*userSearch
+	profiles  map[string]*Profile
+	exp       expState
+	expRepos  map[string]*repoSearch
+	expCode   map[string]*codeSearch
 
 	// home + inbox (batch 10)
 	home     homeState
@@ -207,6 +211,7 @@ func newModel() *model {
 		changes: map[string]*changeList{}, diffs: map[string]*fileDiff{},
 		notifs: map[bool]*notifList{}, subjects: map[string]*subject{},
 		expRepos: map[string]*repoSearch{}, expCode: map[string]*codeSearch{},
+		expUsers: map[string]*userSearch{}, profiles: map[string]*Profile{},
 		lbranches: map[string]*lbranchList{}, llogs: map[string]*logList{}, stashes: map[string][]stashEntry{}, shows: map[string]*showData{},
 	}
 	m.loadRuns()
@@ -497,6 +502,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onConfigDone(msg)
 	case starredMsg:
 		return m, m.onStarred(msg)
+	case followMsg:
+		return m, m.onFollow(msg)
+	case scopeDoneMsg:
+		return m, m.onScopeDone(msg)
+	case scopeNeededMsg:
+		return m, m.onScopeNeeded(msg)
 	case repoDoneMsg:
 		return m, m.onRepoDone(msg)
 	case editedMsg:
@@ -894,7 +905,9 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		case m.tab == tabInbox && m.inbox.query != "":
 			m.inbox.query = ""
 			return m.inboxSelected()
-		case m.tab == tabInbox || m.tab == tabHome || m.tab == tabExplore:
+		case m.tab == tabExplore:
+			return m.expBack()
+		case m.tab == tabInbox || m.tab == tabHome:
 			return nil
 		case m.tab == tabPRs && m.prs.query != "":
 			m.prs.query = ""
@@ -1031,6 +1044,11 @@ func (m *model) zoneAt(x, y int) *zone {
 }
 
 func (m *model) click(ms tea.Mouse) tea.Cmd {
+	if ms.Mod&tea.ModCtrl != 0 && ms.Button == tea.MouseLeft { // ctrl+click a link
+		if u := m.linkAt(ms.X, ms.Y); u != "" {
+			return m.followLink(u)
+		}
+	}
 	if ms.Button != tea.MouseLeft {
 		return nil
 	}
@@ -1668,6 +1686,10 @@ func (m *model) commands() []command {
 		}},
 		command{"All keys", "?", func(m *model) tea.Cmd { m.openHelp(); return nil }},
 		command{"Settings (opens the settings file in your editor)", "", func(m *model) tea.Cmd { return m.editConfig() }},
+		command{"Give TermGit more GitHub permissions (delete repos, follow people)", "", func(m *model) tea.Cmd {
+			return m.askScope("delete_repo,user:follow", "delete repos and follow people", nil)
+		}},
+		command{"Search GitHub users", "", func(m *model) tea.Cmd { m.setTab(tabExplore); m.exp.mode = modeUsers; return m.expAsk() }},
 		command{"Merge the PR", "m", func(m *model) tea.Cmd { return m.prMerge() }},
 		command{"Review the PR (approve / request changes)", "R", func(m *model) tea.Cmd { return m.prReview() }},
 		command{"Check out the PR locally", "K", func(m *model) tea.Cmd { return m.prCheckout() }},
@@ -1713,6 +1735,7 @@ func (m *model) View() tea.View {
 	default:
 		content = m.render()
 	}
+	content, m.linkZones = takeLinks(content)
 	v := tea.NewView(content)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion

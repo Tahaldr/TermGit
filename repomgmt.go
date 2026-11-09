@@ -26,7 +26,7 @@ func (m *model) ghRepo(ok string, args ...string) tea.Cmd {
 		if err != nil {
 			msg := strings.TrimSpace(string(out))
 			if strings.Contains(msg, "delete_repo") {
-				msg = "GitHub needs one more permission to delete repos: run  gh auth refresh -s delete_repo  once"
+				return scopeNeededMsg{"delete_repo", "delete repos", ok, args}
 			}
 			err = fmt.Errorf("%s", msg)
 		}
@@ -186,4 +186,13 @@ func (m *model) repoMgmtKey(s string) (tea.Cmd, bool) {
 		return m.actFork(r), true
 	}
 	return nil, false
+}
+
+type scopeNeededMsg struct {
+	scope, why, ok string
+	args           []string
+}
+
+func (m *model) onScopeNeeded(msg scopeNeededMsg) tea.Cmd {
+	return m.askScope(msg.scope, msg.why, func(m *model) tea.Cmd { return m.ghRepo(msg.ok, msg.args...) })
 }

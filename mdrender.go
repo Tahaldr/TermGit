@@ -491,10 +491,10 @@ func (r *mdr) inline(n ast.Node, st lipgloss.Style) string {
 			if r.fade {
 				s = st
 			}
-			b.WriteString(s.Render(icLinkMd+" ") + r.inline(c, s))
+			b.WriteString(osc8(string(c.Destination), s.Render(icLinkMd+" ")+r.inline(c, s)))
 		case *ast.AutoLink:
 			s := st.Foreground(cAcc)
-			b.WriteString(s.Render(icLinkMd + " " + string(c.Label(r.src))))
+			b.WriteString(osc8(string(c.URL(r.src)), s.Render(icLinkMd+" "+string(c.Label(r.src)))))
 		case *ast.Image:
 			alt := ansi.Strip(r.inline(c, lipgloss.NewStyle()))
 			if alt == "" {

@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const version = "1.0.1"
+const version = "1.1.0"
 
 func main() {
 	cfg = loadConfig()
@@ -125,6 +125,12 @@ func drain(m *model, first tea.Cmd) {
 }
 
 func parseInput(a string) tea.Msg {
+	if strings.HasPrefix(a, "ctrlclick:") {
+		p := strings.Split(a[10:], ",")
+		x, _ := strconv.Atoi(p[0])
+		y, _ := strconv.Atoi(p[1])
+		return tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft, Mod: tea.ModCtrl}
+	}
 	if strings.HasPrefix(a, "click:") || strings.HasPrefix(a, "wheel:") {
 		p := strings.Split(a[6:], ",")
 		x, _ := strconv.Atoi(p[0])

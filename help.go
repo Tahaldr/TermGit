@@ -143,9 +143,12 @@ func helpData() []helpSec {
 		}},
 		{"Explore (7)", []hint{
 			{"/", "search GitHub (language:go stars:>500 user:x repo:owner/name …)"},
-			{"f  [  ]", "Starred / Repos / Issues / Code"},
-			{"enter", "open the repo (an issue in its repo, a code hit at its file)"},
+			{"f  [  ]", "Starred / Repos / Issues / Code / Users"},
+			{"enter", "open the repo (an issue in its repo, a code hit at its file, a user's profile)"},
 			{"s  F  c", "star / fork / clone"},
+			{"u", "on a repo: its owner's profile"},
+			{"F", "on a profile: follow / unfollow"},
+			{"esc", "back: profile → results → clear the search → Starred"},
 		}},
 		{"Full screen (reader)", []hint{
 			{"j / k  space", "scroll a line / a page"},
@@ -157,6 +160,7 @@ func helpData() []helpSec {
 			{"termgit file.md", "read any file on this PC (reloads when you save it)"},
 		}},
 		{"Mouse", []hint{
+			{"ctrl+click", "a link: GitHub links open in TermGit (repo, file, issue, PR, profile), others in the browser"},
 			{"click", "tabs, sections, rows, buttons, crumbs, views, tiles, Contents"},
 			{"double-click", "open"},
 			{"wheel", "scroll whatever is under the pointer"},

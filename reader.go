@@ -497,7 +497,7 @@ func (m *model) rdHints(y int) string {
 	if len(m.rd.hits) > 0 {
 		h = append(h, [2]string{"n/N", "next/prev match"})
 	}
-	h = append(h, [2]string{"e", "nvim"})
+	h = append(h, [2]string{"ctrl+click", "links"}, [2]string{"e", "nvim"})
 	if m.rd.path == "" {
 		h = append(h, [2]string{"o", "browser"})
 	}

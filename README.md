@@ -36,7 +36,7 @@ TermGit does everything lazygit does for your repos on this PC; lazygit stays on
 | **4 PRs** | Pull requests across your repos: your repos / review requests / created / involved. |
 | **5 Actions** | CI runs: running first, then still-broken ones, then the rest (`f`: all / failed / running). |
 | **6 Inbox** | Notifications (the tab shows the unread count). `enter` opens the item's page in TermGit and marks it read, `v` reads it full screen, `m` / `M` mark read, `x` unsubscribe. |
-| **7 Explore** | Your starred repos, or search all of GitHub for repos, issues or code (`/`, with GitHub's search words like `language:go stars:>500`). Open any repo, star, fork, clone. |
+| **7 Explore** | Your starred repos, or search all of GitHub for repos, issues, code or users (`/`, with GitHub's search words like `language:go stars:>500`). Open any repo, star, fork, clone; open a user's profile (bio, followers, pinned and all repos), follow them. `esc` steps back. |
 
 From Home and the Inbox, `enter` jumps to the item's normal page (its repo, section, item highlighted); `esc` comes back.
 
@@ -70,6 +70,8 @@ Anything that can't be undone asks first, in the bottom bar.
 - Releases: `enter` reads the notes, `d` downloads its files, `N` new release (notes in your editor or made from the commits).
 
 ## Reader
+
+**Links**: ctrl+click any link (in READMEs, files, comments, logs). GitHub links open inside TermGit (repo, file, issue, PR, profile), links to other files of the repo open that file, the rest open in the browser.
 
 Full screen (`v`, or `enter` on markdown): markdown drawn like render-markdown.nvim (heading bars,
 `□` / `■` checkboxes, code blocks, tables, callouts), a **Contents** panel (`t`, click to jump),
@@ -108,6 +110,8 @@ editor = nvim             # e.g. code -w
 git_tool = lazygit        # the L key
 notify_every = 60         # seconds
 ```
+
+Deleting repos and following people need two extra GitHub permissions; TermGit asks for them the first time (a browser page to approve), or `ctrl+p → Give TermGit more GitHub permissions`.
 
 Data from GitHub is cached in `%LOCALAPPDATA%\termgit`, so TermGit opens instantly and refreshes in the background.
 
