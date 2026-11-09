@@ -1,5 +1,7 @@
 package main
 
+import "strings"
+
 // The key hints at the bottom: every action you can do right now, for the screen and
 // the highlighted item. They wrap onto a second line instead of being cut off.
 
@@ -22,7 +24,21 @@ func (m *model) hintItems() []hint {
 		}
 
 	case m.tab == tabHome:
-		h = []hint{{"j/k", "move"}, {"enter", "go there (esc comes back)"}, {"tab", "scroll the right side"}, {"o", "browser"}, {"r", "refresh"}, {"1-7", "tabs"}}
+		h = []hint{{"j/k", "move"}, {"enter", "go there"}}
+		if it := m.homeSel(); it != nil {
+			for _, k := range strings.Fields(it.keys) {
+				what := map[string]string{"R": "re-run", "m": "merge", "c": "commit", "p": "pull", "P": "push", "M": "mark all read"}[k]
+				if it.kind == "review" && k == "R" {
+					what = "review"
+				}
+				h = append(h, hint{k, what})
+			}
+		}
+		h = append(h, hint{"alt+1-5", "recent repos"}, hint{"t", "layout"})
+		if !m.homeGrid {
+			h = append(h, hint{"tab", "scroll the right side"})
+		}
+		h = append(h, hint{"o", "browser"}, hint{"r", "refresh"}, hint{"1-7", "tabs"})
 	case m.tab == tabInbox && m.inbox.filtering:
 		return []hint{{"type", "to find"}, {"↑↓", "move"}, {"enter", "keep it"}, {"esc", "clear"}}
 	case m.tab == tabInbox:

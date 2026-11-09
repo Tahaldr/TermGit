@@ -62,6 +62,7 @@ const (
 	icMerge     = ""
 	icChanges   = ""
 	icCloud     = ""
+	icCalendar  = ""
 	icRead      = ""
 )
 

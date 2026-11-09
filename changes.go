@@ -192,7 +192,9 @@ func (m *model) onGitDone(msg gitDoneMsg) tea.Cmd {
 		case strings.Contains(out, "rejected") || strings.Contains(out, "fetch first") || strings.Contains(out, "non-fast-forward"):
 			dir := msg.dir
 			m.prompt = &prompt{label: "GitHub has commits you don't. Pull first (n), or force push and overwrite them (y)?", confirm: true,
-				no: func(m *model) tea.Cmd { return m.chPull() },
+				no: func(m *model) tea.Cmd {
+					return tea.Batch(m.setStatus("Pulling…", false), m.git(dir, "Pulled from GitHub", "pull", "pull", "--ff-only"))
+				},
 				done: func(m *model, _ string) tea.Cmd {
 					return m.git(dir, "Force pushed", "push", "push", "--force-with-lease")
 				}}

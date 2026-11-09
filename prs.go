@@ -527,8 +527,9 @@ func (m *model) prOpenLocal(app string) tea.Cmd {
 
 // ---- doing things ----
 
-func (m *model) prMerge() tea.Cmd {
-	p := m.selPR()
+func (m *model) prMerge() tea.Cmd { return m.prMergeFor(m.selPR()) }
+
+func (m *model) prMergeFor(p *PR) tea.Cmd {
 	if p == nil {
 		return nil
 	}
@@ -562,8 +563,9 @@ func (m *model) prMerge() tea.Cmd {
 	return nil
 }
 
-func (m *model) prReview() tea.Cmd {
-	p := m.selPR()
+func (m *model) prReview() tea.Cmd { return m.prReviewFor(m.selPR()) }
+
+func (m *model) prReviewFor(p *PR) tea.Cmd {
 	if p == nil {
 		return nil
 	}

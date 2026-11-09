@@ -126,7 +126,9 @@ type model struct {
 	contrib  *contribData
 	events   *eventList
 	liveN    int
-	backTo   int // the tab to return to when leaving a repo opened from Home / Inbox (-1 = none)
+	backTo   int      // the tab to return to when leaving a repo opened from Home / Inbox (-1 = none)
+	homeGrid bool     // Home as a dashboard (t switches to two panels)
+	recent   []string // repos opened last
 
 	// local git 2 (batch 8)
 	lbranches map[string]*lbranchList
@@ -185,7 +187,7 @@ type model struct {
 
 func newModel() *model {
 	m := &model{
-		tab: tabRepos, readme: map[string]readmeEntry{}, readmeErr: map[string]string{},
+		tab: tabHome, readme: map[string]readmeEntry{}, readmeErr: map[string]string{},
 		fresh: map[string]bool{}, fetching: map[string]bool{}, mdCache: map[string][]string{}, mdWidth: map[string]int{},
 		local: scanLocal(localRoots), lastIdx: -1, backTo: -1,
 		exSaved: map[string]*explorer{}, linfo: map[string]localInfo{}, loaded: map[string]bool{},
@@ -200,6 +202,7 @@ func newModel() *model {
 		lbranches: map[string]*lbranchList{}, llogs: map[string]*logList{}, stashes: map[string][]stashEntry{}, shows: map[string]*showData{},
 	}
 	m.loadRuns()
+	m.loadSettings()
 	var c reposCache
 	if loadCache("repos.json", &c) {
 		m.login, m.repos, m.reposAt = c.Login, c.Repos, c.At
@@ -217,6 +220,9 @@ func (m *model) Init() tea.Cmd {
 	}
 	m.loading = true
 	cmds := []tea.Cmd{fetchRepos(), m.onSelect(), m.scanLocalInfo(), m.load("notifs:false", false, fetchNotifs(false))}
+	if m.tab == tabHome {
+		cmds = append(cmds, m.homeLoad())
+	}
 	if !m.dump {
 		cmds = append(cmds, live())
 	}
@@ -1077,6 +1083,11 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 			return tea.Batch(cmd, m.inboxOpen())
 		}
 		return cmd
+	case "hometile":
+		if z.idx == tabActions {
+			m.act.filter = 1
+		}
+		return m.setTab(z.idx)
 	case "inboxall":
 		m.inbox.all, m.inbox.cur, m.inbox.off = z.idx == 1, 0, 0
 		return m.inboxSelected()
@@ -1304,7 +1315,21 @@ func (m *model) actClone(then string) tea.Cmd {
 func (m *model) buttons() []button {
 	switch m.tab {
 	case tabHome:
-		return []button{{icRead + " Open", "enter", "homeopen"}, {icGlobe + " Browser", "o", "browser"}, {icRefresh + " Refresh", "r", "refresh"}}
+		b := []button{{icRead + " Open", "enter", "homeopen"}}
+		if it := m.homeSel(); it != nil {
+			for _, k := range strings.Fields(it.keys) {
+				label := map[string]string{"R": icRefresh + " Re-run", "m": icMerge + " Merge", "c": icCommit + " Commit", "p": icDown + " Pull", "P": icUp + " Push", "M": icCheck + " Mark all read"}[k]
+				if it.kind == "review" && k == "R" {
+					label = icCheck + " Review"
+				}
+				b = append(b, button{label, k, "homekey:" + k})
+			}
+		}
+		layout := "Two panels"
+		if !m.homeGrid {
+			layout = "Dashboard"
+		}
+		return append(b, button{layout, "t", "homekey:t"}, button{icGlobe + " Browser", "o", "browser"}, button{icRefresh + " Refresh", "r", "refresh"})
 	case tabInbox:
 		b := []button{}
 		if m.selNotif() != nil {
@@ -1357,6 +1382,9 @@ func (m *model) runButton(i int) tea.Cmd {
 	b := m.buttons()
 	if i >= len(b) {
 		return nil
+	}
+	if strings.HasPrefix(b[i].id, "homekey:") {
+		return m.homeKey(strings.TrimPrefix(b[i].id, "homekey:"))
 	}
 	switch b[i].id {
 	case "homeopen":
@@ -1616,6 +1644,19 @@ func (m *model) render() string {
 	lw, ph := m.layout()
 	pw := m.w - lw
 	lines := []string{m.tabsBar(), m.pathBar()}
+	if m.tab == tabHome && m.homeGrid && !m.help {
+		lines = append(lines, m.homeGridRender(ph)...)
+		for len(lines) < 2+ph {
+			lines = append(lines, "")
+		}
+		if m.palette {
+			lines = append(lines, m.paletteBox(2+ph)...)
+		}
+		nh := m.hintRows()
+		lines = append(lines, m.buttonsBar(m.h-1-nh))
+		lines = append(lines, m.hintLines(m.h-nh)...)
+		return strings.Join(lines, "\n")
+	}
 	var left []string
 	if m.exActive() != nil {
 		left = m.exListBox(lw, ph, 2)
@@ -2171,7 +2212,11 @@ func helpLines(w int) []string {
 		"",
 		sec("Home (1)"),
 		row("j/k  enter", "what needs you: failing CI, reviews, your PRs, assigned issues, repos to push / pull"),
-		row("", "the right side: your contribution graph, numbers and recent activity"),
+		row("R  m", "on a row: re-run failed CI / review / merge a PR"),
+		row("c  p  P", "on a repo row: commit / pull / push"),
+		row("M", "mark all notifications read"),
+		row("alt+1-5", "open one of your recent repos"),
+		row("t", "dashboard / two-panel layout"),
 		"",
 		sec("Inbox (6)"),
 		row("enter", "open it in TermGit: its repo and section, it highlighted (marked read; esc comes back)"),

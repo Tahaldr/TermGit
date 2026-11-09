@@ -42,6 +42,7 @@ func (m *model) gotoItem(nwo string, sec int, what string, match func(exItem) bo
 	ex.query[sec], ex.filtering, ex.plan = "", false, nil
 	m.ex, m.focus, m.help = ex, 0, false
 	ex.want = &want{sec: sec, match: match, what: what, flip: flip}
+	m.rememberRepo(repo.NameWithOwner)
 	cmd := m.exSetSec(sec)
 	m.applyWant()
 	return cmd

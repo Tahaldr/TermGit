@@ -585,8 +585,9 @@ func post(path string, body any) error {
 	return c.Post(path, rd, nil)
 }
 
-func (m *model) actRerun() tea.Cmd {
-	r := m.selRun()
+func (m *model) actRerun() tea.Cmd { return m.actRerunFor(m.selRun()) }
+
+func (m *model) actRerunFor(r *Run) tea.Cmd {
 	if r == nil {
 		return nil
 	}

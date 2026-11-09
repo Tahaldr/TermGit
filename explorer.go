@@ -93,6 +93,7 @@ func (m *model) openRepo() tea.Cmd {
 		ex = &explorer{repo: *r, ref: r.Branch(), refOid: r.HeadOid(), dirCur: map[string]int{}}
 	}
 	m.ex, m.focus, m.help = ex, 0, false
+	m.rememberRepo(r.NameWithOwner)
 	return m.exSelected()
 }
 
