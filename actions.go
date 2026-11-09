@@ -952,7 +952,7 @@ func (m *model) actNewRelease() tea.Cmd {
 			}, done: func(m *model, _ string) tea.Cmd {
 				f := filepath.Join(os.TempDir(), "termgit-release-notes.md")
 				os.WriteFile(f, []byte("## What's new\n\n- \n"), 0o644)
-				c := exec.Command("nvim", f)
+				c := editorCmd(f)
 				if m.dump {
 					return m.confirmRelease(nwo, tag, title, target, f)
 				}

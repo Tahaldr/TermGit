@@ -716,7 +716,7 @@ func (m *model) saveSettings() {
 
 func (m *model) loadSettings() {
 	var s settings
-	m.homeGrid = true
+	m.homeGrid = cfg.homeLayout != "panels"
 	if loadCache("settings.json", &s) {
 		m.homeGrid = !s.HomeList
 	}

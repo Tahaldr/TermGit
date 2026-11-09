@@ -11,9 +11,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const version = "0.11.0"
+const version = "1.0.0"
 
 func main() {
+	cfg = loadConfig()
+	cloneRoot, localRoots = cfg.cloneInto, cfg.lookIn
 	args := os.Args[1:]
 	if len(args) > 0 {
 		switch args[0] {
@@ -24,9 +26,13 @@ func main() {
 			// test helper: termgit --dump 140x40 [keys or click:x,y / wheel:x,y,up|down ...]
 			dump(args[1:])
 			return
+		case "--config":
+			fmt.Println(configPath())
+			return
 		case "--help", "-h":
 			fmt.Println("termgit            GitHub in the terminal")
 			fmt.Println("termgit FILE       read a file (markdown or code) full screen; reloads when it changes")
+			fmt.Println("termgit --config   where the settings file is (ctrl+p → Settings edits it)")
 			fmt.Println("termgit --version")
 			return
 		}

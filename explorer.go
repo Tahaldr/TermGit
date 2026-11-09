@@ -714,9 +714,9 @@ func (m *model) runApp(app, dir string) tea.Cmd {
 				target = filepath.FromSlash(f)
 			}
 		}
-		c = exec.Command("nvim", target)
+		c = editorCmd(target)
 	case "lazygit":
-		c = exec.Command("lazygit")
+		c = gitToolCmd()
 	default:
 		return nil
 	}

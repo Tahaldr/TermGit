@@ -134,6 +134,7 @@ type model struct {
 	liveN    int
 	backTo   int      // the tab to return to when leaving a repo opened from Home / Inbox (-1 = none)
 	homeGrid bool     // Home as a dashboard (t switches to two panels)
+	hintN    int      // lines the key hints take this frame
 	recent   []string // repos opened last
 
 	// local git 2 (batch 8)
@@ -210,6 +211,7 @@ func newModel() *model {
 	}
 	m.loadRuns()
 	m.loadSettings()
+	m.applyConfig()
 	var c reposCache
 	if loadCache("repos.json", &c) {
 		m.login, m.repos, m.reposAt = c.Login, c.Repos, c.At
@@ -227,8 +229,12 @@ func (m *model) Init() tea.Cmd {
 	}
 	m.loading = true
 	cmds := []tea.Cmd{fetchRepos(), m.onSelect(), m.scanLocalInfo(), m.load("notifs:false", false, fetchNotifs(false))}
-	if m.tab == tabHome {
+	switch m.tab {
+	case tabHome:
 		cmds = append(cmds, m.homeLoad())
+	case tabRepos:
+	default:
+		cmds = append(cmds, m.setTab(m.tab))
 	}
 	if !m.dump {
 		cmds = append(cmds, live())
@@ -368,7 +374,11 @@ func (m *model) layout() (lw, ph int) {
 	if lw > 64 {
 		lw = 64
 	}
-	ph = m.h - 3 - m.hintRows() - m.palRows()
+	nh := m.hintN // worked out once per frame (it looks at a lot)
+	if nh == 0 {
+		nh = m.hintRows()
+	}
+	ph = m.h - 3 - nh - m.palRows()
 	return
 }
 
@@ -472,7 +482,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.linfo = msg
 	case liveTick:
 		m.liveN++
-		if m.liveN%12 == 0 { // notifications: every minute
+		if m.liveN%max(1, cfg.notify/5) == 0 { // notifications: every minute (settings: notify_every)
 			delete(m.loaded, "notifs:false")
 			if m.tab == tabInbox {
 				m.inboxForget()
@@ -483,6 +493,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onLive()
 	case inboxDoneMsg:
 		return m, m.onInboxDone(msg)
+	case configDoneMsg:
+		return m, m.onConfigDone(msg)
 	case starredMsg:
 		return m, m.onStarred(msg)
 	case repoDoneMsg:
@@ -866,8 +878,7 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		m.openPicker("", nil)
 		return nil
 	case "?":
-		m.help = !m.help
-		m.pvOff = 0
+		m.openHelp()
 		return nil
 	case "1", "2", "3", "4", "5", "6", "7":
 		i, _ := strconv.Atoi(s)
@@ -1196,7 +1207,7 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 			return list[z.idx].run(m)
 		}
 	case "hint-help":
-		m.help = !m.help
+		m.openHelp()
 	case "hint-pal":
 		m.openPicker("", nil)
 	}
@@ -1655,7 +1666,8 @@ func (m *model) commands() []command {
 			}
 			return m.refresh()
 		}},
-		command{"Show all keys", "?", func(m *model) tea.Cmd { m.help = true; m.pvOff = 0; return nil }},
+		command{"All keys", "?", func(m *model) tea.Cmd { m.openHelp(); return nil }},
+		command{"Settings (opens the settings file in your editor)", "", func(m *model) tea.Cmd { return m.editConfig() }},
 		command{"Merge the PR", "m", func(m *model) tea.Cmd { return m.prMerge() }},
 		command{"Review the PR (approve / request changes)", "R", func(m *model) tea.Cmd { return m.prReview() }},
 		command{"Check out the PR locally", "K", func(m *model) tea.Cmd { return m.prCheckout() }},
@@ -1690,6 +1702,8 @@ func (m *model) commands() []command {
 func (m *model) View() tea.View {
 	m.zones = m.zones[:0]
 	m.cardLines = nil
+	m.hintN = 0
+	m.hintN = m.hintRows()
 	var content string
 	switch {
 	case m.w < 70 || m.h < 16:
@@ -2182,182 +2196,6 @@ func (m *model) hintBar(y int) string {
 			hints([][2]string{{"↑↓", "choose"}, {"enter", "run"}, {"esc", "close"}})
 	}
 	return ""
-}
-
-func helpLines(w int) []string {
-	sec := func(t string) string { return fg(cAcc).Bold(true).Render(t) }
-	row := func(k, d string) string { return "  " + fg(cTxt).Render(fmt.Sprintf("%-14s", k)) + fg(cMut).Render(d) }
-	return []string{
-		sec("Everywhere"),
-		row("1 - 7", "switch tab (or click it)"),
-		row("ctrl+p  :", "command palette: type what you want to do"),
-		row("?", "show / hide this list"),
-		row("ctrl+d/u", "scroll the right panel"),
-		row("esc", "go back"),
-		row("q", "quit"),
-		"",
-		sec("Repo list"),
-		row("j/k  ↑/↓", "move (or mouse wheel)"),
-		row("enter", "open the repo: code, commits, branches (or double-click)"),
-		row("tab  l", "scroll the README on the right"),
-		row("v", "read the README full screen"),
-		row("/", "filter by name, description or language"),
-		row("g / G", "first / last"),
-		"",
-		sec("Inside a repo"),
-		row("[  ]", "switch section: Code, Commits, Branches (or click them)"),
-		row("enter  l", "open a folder / file / commit; on a branch: browse it"),
-		row("esc  h  ⌫", "back: up a folder, then to the repo list"),
-		row("/", "find a file anywhere in the repo, a commit or a branch"),
-		row("crumbs", "click the path at the top to jump back"),
-		row("v", "full screen: the file, folder README or commit"),
-		"",
-		sec("Reader (full screen)"),
-		row("j/k space", "scroll a line / a page (or mouse wheel)"),
-		row("]  [", "next / previous heading"),
-		row("t", "show / hide Contents (click a heading to jump)"),
-		row("/  n  N", "find text, next / previous match"),
-		row("e", "edit in Nvim"),
-		row("esc  q", "close"),
-		row("termgit x.md", "open any file on this PC in the reader"),
-		"",
-		sec("Selected repo / file"),
-		row("e", "open in Nvim (the highlighted file if it's on this PC)"),
-		row("L", "open lazygit: commit, push, pull"),
-		row("p  P", "pull / push (like lazygit)"),
-		row("o", "open what you see in the browser"),
-		row("y", "copy its link"),
-		row("c", "clone into "+cloneRoot),
-		row("r", "refresh from GitHub"),
-		"",
-		sec("Badges on repos you have on this PC"),
-		row(icFolder, "cloned here"),
-		row("●", "files changed but not committed"),
-		row("↑2", "2 commits not pushed to GitHub"),
-		row("↓3  ↓", "GitHub has 3 (or some) new commits: pull in lazygit"),
-		"",
-		sec("Changes — a repo on this PC (the keys lazygit uses)"),
-		row("space", "stage / unstage the file"),
-		row("a", "stage / unstage everything"),
-		row("d", "discard the file's changes (asks first)"),
-		row("c  C", "commit: message here / in Nvim (offers to stage all if nothing is)"),
-		row("A", "amend the last commit"),
-		row("p  P  f", "pull / push / fetch"),
-		row("e", "open the file in Nvim"),
-		"",
-		row("enter", "pick single lines in the diff: space stages one, a the whole hunk"),
-		row("s  S", "stash: put your changes aside (S chooses which); stashes are listed at the bottom"),
-		"",
-		sec("Branches — a repo on this PC"),
-		row("space", "switch to it (a GitHub-only branch gets a local copy)"),
-		row("enter", "its commits"),
-		row("n", "new branch from the one you're on"),
-		row("M  B", "merge it into yours / rebase yours onto it"),
-		row("R  D", "rename / delete (GitHub-only and tags too)"),
-		row("u", "link it to a GitHub branch"),
-		row("P", "on a tag: push the tag"),
-		row("b", "browse its code on GitHub"),
-		"",
-		sec("Commits — a repo on this PC (with the graph)"),
-		row("enter", "what changed"),
-		row("C", "cherry-pick: copy it onto your branch"),
-		row("t", "revert: undo it with a new commit"),
-		row("X", "reset your branch to it: soft / mixed / hard"),
-		row("T", "tag it"),
-		row("y", "copy its id"),
-		row("space", "check it out (no branch)"),
-		row("i", "interactive rebase from here: plan pick / squash / fixup / reword / drop / move"),
-		row("S  F", "squash / fixup it into the commit below"),
-		row("R  D", "reword its message / drop it"),
-		"",
-		sec("Conflicts — files marked U in Changes"),
-		row("enter", "go through the conflicts: o keeps the top, t the bottom, b both"),
-		row("O  T", "keep the top / bottom version of the whole file"),
-		row("e", "fix it by hand in Nvim"),
-		row("ctrl+p", "Continue (when all are fixed) or Abort the merge / rebase"),
-		"",
-		sec("Remotes and worktrees — listed at the bottom of Branches"),
-		row("A", "add a remote"),
-		row("f  E  R  D", "on a remote: fetch / change URL / rename / remove"),
-		row("w", "on a branch: open it in its own folder (worktree)"),
-		row("e  L  D", "on a worktree: Nvim / lazygit / remove"),
-		"",
-		sec("PR comments — the Comments view"),
-		row("j / k", "pick a comment (right panel focused: tab or a click)"),
-		row("r", "reply (in the thread on code, or quoting the comment)"),
-		row("x", "resolve / unresolve a comment on code"),
-		row("+", "react 👍 ❤️ 🎉 …"),
-		row("enter", "jump to that file in the Files view"),
-		"",
-		sec("Home (1)"),
-		row("j/k  enter", "what needs you: failing CI, reviews, your PRs, assigned issues, repos to push / pull"),
-		row("R  m", "on a row: re-run failed CI / review / merge a PR"),
-		row("c  p  P", "on a repo row: commit / pull / push"),
-		row("M", "mark all notifications read"),
-		row("alt+1-5", "open one of your recent repos"),
-		row("t", "dashboard / two-panel layout"),
-		"",
-		sec("Explore (7)"),
-		row("/", "search GitHub (its search words work: language:go stars:>500 user:x …)"),
-		row("f  [ ]", "Starred / Repos / Issues / Code"),
-		row("enter", "open the repo (or the issue / the file in its repo)"),
-		row("s  F  c", "star / fork / clone"),
-		row("v", "read the README full screen"),
-		"",
-		sec("Your repos (Repos tab)"),
-		row("N", "new repo: empty, empty + clone, or upload a folder"),
-		row("R  E", "rename / edit the description"),
-		row("V", "make private / public"),
-		row("A", "archive / unarchive"),
-		row("D", "delete (you type its name to confirm)"),
-		row("s  F", "star / fork"),
-		"",
-		sec("Inbox (6)"),
-		row("enter", "open it in TermGit: its repo and section, it highlighted (marked read; esc comes back)"),
-		row("v", "read the conversation full screen"),
-		row("m  M", "mark read / mark all read"),
-		row("x", "unsubscribe: no more notifications for it"),
-		row("a", "unread / all"),
-		"",
-		sec("Pull requests — the PRs tab, or a repo's PRs section"),
-		row("[  ]", "views: Overview, Commits, Checks, Files (or click them)"),
-		row("{  }", "the same inside a repo (where [ ] switch sections)"),
-		row("enter  v", "the view full screen: conversation, commits, a failing check's logs, the changes"),
-		row("m", "merge: squash / merge commit / rebase, then keep or delete the branch"),
-		row("R", "review: approve, request changes, or comment"),
-		row("C", "comment (written in Nvim)"),
-		row("K", "check it out in your local copy"),
-		row("x", "close / reopen"),
-		row("N", "new PR: from branch, into branch, title, description"),
-		row("s  f", "open / closed+merged, and scope (yours, review requests…)"),
-		"",
-		sec("Issues — the Issues tab, or a repo's Issues section"),
-		row("enter  v", "read the whole conversation (each message is a heading)"),
-		row("C", "comment: write it in Nvim, save and quit, confirm"),
-		row("N", "new issue: title, then a description in Nvim (or none)"),
-		row("x", "close / reopen"),
-		row("t", "labels: pick one to add or remove it"),
-		row("E", "edit the description in Nvim"),
-		row("s", "show open / closed"),
-		row("f", "Issues tab: your repos / involved / assigned / created"),
-		"",
-		sec("Actions (CI) — the Actions tab, or a repo's Actions section"),
-		row("enter", "read the logs: jobs and steps are headings, opens at the first error"),
-		row("R", "re-run (only the failed jobs if it failed)"),
-		row("x", "cancel a running run"),
-		row("w", "start a workflow by hand (needs on: workflow_dispatch)"),
-		row("f", "Actions tab: all / failed / running"),
-		row("", "running runs update by themselves every 5 seconds"),
-		"",
-		sec("Releases — a repo's Releases section"),
-		row("enter  v", "read the release notes full screen"),
-		row("d", "download its files to Downloads"),
-		row("N", "new release: tag, title, notes in Nvim (or from the commits)"),
-		"",
-		sec("Mouse"),
-		row("click", "tabs, repos, buttons, commands"),
-		row("wheel", "scroll the panel under the pointer"),
-	}
 }
 
 func ago(t time.Time) string {

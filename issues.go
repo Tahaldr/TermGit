@@ -410,7 +410,7 @@ func (m *model) editInNvim(name, initial string, then func(m *model, text string
 	if m.dump {
 		return func() tea.Msg { return editedMsg{"(written in Nvim)", nil, then} }
 	}
-	c := exec.Command("nvim", "+", f) // + = start at the end of the file
+	c := editorAtEnd(f)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		data, _ := os.ReadFile(f)
 		return editedMsg{strings.TrimSpace(htmlComment.ReplaceAllString(string(data), "")), err, then}

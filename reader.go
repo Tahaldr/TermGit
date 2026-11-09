@@ -6,7 +6,6 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -296,7 +295,7 @@ func (m *model) rdKey(k tea.KeyPressMsg) tea.Cmd {
 	s := k.String()
 	page := m.rdRows()
 	switch s {
-	case "esc", "q", "backspace", "h", "left":
+	case "esc", "q", "backspace", "h", "left", "?":
 		if rd.find != "" && s == "esc" {
 			rd.find, rd.hits = "", nil
 			return nil
@@ -338,7 +337,7 @@ func (m *model) rdKey(k tea.KeyPressMsg) tea.Cmd {
 		}
 	case "e":
 		if rd.path != "" {
-			c := exec.Command("nvim", rd.path)
+			c := editorCmd(rd.path)
 			c.Dir = filepath.Dir(rd.path)
 			if m.dump {
 				return m.setStatus("Would run nvim "+rd.path, false)

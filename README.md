@@ -1,123 +1,123 @@
 # TermGit
 
-GitHub in the terminal: usable fully by mouse or fully by keyboard, in muted onedark colors.
-Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
+GitHub and Git in one terminal app: your repos, code, changes, branches, history, issues,
+pull requests, CI, releases, notifications and GitHub search. Every action has a key and a
+clickable button, and the keys for what you're looking at are always in the bar at the bottom.
+Muted onedark colors, Nerd Font icons.
 
-## Status
+TermGit does everything lazygit does for your repos on this PC; lazygit stays one key away (`L`).
 
-| Batch | What | State |
-| --- | --- | --- |
-| 1 | Base: layout, tabs, mouse, command palette, bottom-bar prompts, Repos list + README | done |
-| 2 | Repo explorer: code, commits, branches, Nvim, lazygit, local badges | done |
-| 3 | Markdown reader: Nvim-style markdown, full-screen reader, Contents, `termgit file.md` | done |
-| 4 | Actions + Releases | done |
-| 5 | Issues | done |
-| 6 | Pull requests | done |
-| 7 | Local Git 1: Changes (stage, commit, amend, pull, push, fetch) + PR Comments (reply, resolve, react) | done |
-| 8 | Local Git 2: branches, stash, graph, cherry-pick, revert, reset, tags, line staging | done |
-| 9 | Local Git 3: conflicts, interactive rebase, remotes, worktrees | done |
-| 10 | Home + Inbox: what needs you, contribution graph, activity, notifications | done |
-| 11 | Explore (search repos / issues / code, stars, fork) + repo management (create, rename, visibility, archive, delete) | done |
-| 12 | Polish: settings, help page, tests | next |
+- [Install](#install)
+- [The tabs](#the-tabs)
+- [Inside a repo](#inside-a-repo)
+- [Git on this PC](#git-on-this-pc)
+- [Issues and pull requests](#issues-and-pull-requests)
+- [Actions and releases](#actions-and-releases)
+- [Reader](#reader)
+- [Keys](#keys)
+- [Settings](#settings)
+- [Build and test](#build-and-test)
 
-TermGit aims to do everything lazygit does; lazygit stays one key away (`L`).
+## Install
 
-## Keys
+1. Install the [GitHub CLI](https://cli.github.com) and log in once: `gh auth login`.
+   TermGit uses that login and never stores a token.
+2. Install a [Nerd Font](https://www.nerdfonts.com) and pick it in your terminal (for the icons).
+3. Build TermGit (see [Build](#build-and-test)) and put `termgit.exe` on your PATH.
+4. Run `termgit`. Optional: Nvim and lazygit (both can be changed in the [settings](#settings)).
 
-| Key | Does |
+## The tabs
+
+| Tab | What's there |
 | --- | --- |
-| `1`–`7` | switch tab (or click it) |
-| `ctrl+p` / `:` | command palette |
-| `?` | all keys |
-| `j`/`k`, arrows, wheel | move / scroll |
-| `enter` / double-click | open the repo (code, commits, branches) |
-| `tab` | switch between list and preview (README) |
-| `[` / `]` | inside a repo: Code, Commits, Branches |
-| `esc` / `h` / backspace | back: up a folder, then to the repo list |
-| `e` / `L` | open in Nvim / lazygit (asks to clone first if needed) |
-| `p` / `P` | pull (fast-forward only, never merges) / push |
-| `/` | filter repos; inside a repo: find a file, commit or branch |
-| `ctrl+d` / `ctrl+u` | scroll the right panel |
-| `o` / `y` / `c` / `r` | browser / copy link (of what's on screen) / clone / refresh |
-| `v` | read full screen (README, file, commit) |
-| `esc` | back |
-| `q` | quit |
+| **1 Home** | Number tiles (contributions, streak, this week, your PRs, CI), your contribution graph, **Needs you** (failing CI, reviews asked of you, your PRs, assigned issues, repos on this PC with work to commit / push / pull, unread notifications, recent repos) and your activity by day. Rows have quick keys: `R` re-run / review, `m` merge, `c` `p` `P` commit / pull / push, `M` mark all read, `alt+1–5` recent repos. `t` switches to a two-panel layout. |
+| **2 Repos** | Your repos (yours, shared and org ones) with badges for the ones on this PC: folder, `●` changes, `↑` to push, `↓` to pull. README preview. `N` new repo, `R` rename, `E` description, `V` visibility, `A` archive, `D` delete (type the name), `c` clone, `s` star, `F` fork. |
+| **3 Issues** | Issues across your repos: your repos / involved / assigned / created (`f`), open or closed (`s`). |
+| **4 PRs** | Pull requests across your repos: your repos / review requests / created / involved. |
+| **5 Actions** | CI runs: running first, then still-broken ones, then the rest (`f`: all / failed / running). |
+| **6 Inbox** | Notifications (the tab shows the unread count). `enter` opens the item's page in TermGit and marks it read, `v` reads it full screen, `m` / `M` mark read, `x` unsubscribe. |
+| **7 Explore** | Your starred repos, or search all of GitHub for repos, issues or code (`/`, with GitHub's search words like `language:go stars:>500`). Open any repo, star, fork, clone. |
 
-## Explore and managing your repos
+From Home and the Inbox, `enter` jumps to the item's normal page (its repo, section, item highlighted); `esc` comes back.
 
-- **Explore** (`7`): Starred / Repos / Issues / Code (`f` or click). `/` searches all of GitHub with its search words (`language:go stars:>500`, `user:x`, `repo:owner/name` …). `enter` opens the repo in the explorer (an issue in its repo, a code hit at that file), `s` star / unstar, `F` fork, `c` clone, `v` README full screen.
-- **Repos** tab: `N` new repo (empty, empty + clone, or upload a folder from this PC), `R` rename (your copy's remote is updated), `E` description, `V` private / public, `A` archive / unarchive, `D` delete (type its name to confirm), `s` star, `F` fork.
+## Inside a repo
 
-## Home and Inbox
+`enter` on a repo opens it. Sections (`[` `]` or click): **Code · Changes · Issues · PRs · Commits · Branches · Actions · Releases**.
 
-- **Home** (`1`, the start page): number tiles (contributions, streak, this week, your PRs, CI), the contribution graph, then what needs you, grouped, with quick keys on each row (`R` re-run CI or review, `m` merge, `c` / `p` / `P` commit / pull / push a repo on this PC, `M` mark all read) and your recent repos (`alt+1`–`5`). `t` switches to a two-panel layout. What needs you: failing CI, reviews asked of you, your open PRs, issues assigned to you, repos on this PC with changes to commit / push / pull, unread notifications. `enter` opens its normal page in TermGit (the repo, the right section, that item highlighted); `esc` comes back. On the right: your contribution graph, numbers and recent activity.
-- **Inbox** (`6`, the tab shows the unread count): your notifications. `enter` opens its page in TermGit (PR, issue, CI run, release) and marks it read, `v` reads the conversation full screen, `m` mark read, `M` mark all read, `x` unsubscribe, `a` unread / all. Checked every minute.
+- **Code**: folders and files with syntax colors, markdown rendered; `/` finds a file anywhere; `e` opens it in your editor.
+- The path at the top is clickable, and `esc` goes one step back along it.
 
-## Changes (local Git)
+## Git on this PC
 
-Open a repo that's on this PC, then the **Changes** section (`]`): every changed file, its diff on the right.
-Same keys as lazygit: `space` stage / unstage, `a` all, `d` discard, `c` commit (`C` in Nvim), `A` amend,
-`p` pull, `P` push (offers force-with-lease if GitHub has commits you don't), `f` fetch, `e` open in Nvim.
+For repos cloned on this PC the sections show your local Git (same keys as lazygit):
 
-## Branches, history, stash (repos on this PC)
+- **Changes**: `space` stage / unstage, `a` all, `enter` then `j`/`k` + `space` stages single lines (`a` the hunk), `d` discard, `c` commit (`C` in your editor), `A` amend, `s` / `S` stash (stashes are listed at the bottom), `p` pull (fast-forward only), `P` push (first push links the branch; offers force-with-lease when needed), `f` fetch.
+- **Conflicts** (files marked `U`): `enter`, then `o` keeps the top, `t` the bottom, `b` both; `O` / `T` for the whole file; then Continue or Abort (buttons, or `ctrl+p`).
+- **Commits**: your history with the graph (`↑` = not pushed). `i` interactive rebase from a commit (pick / squash / fixup / reword / drop / move, nothing runs until `enter`), `S` `F` `R` `D` quick squash / fixup / reword / drop, `C` cherry-pick, `t` revert, `X` reset (soft / mixed / hard), `T` tag, `y` copy id.
+- **Branches**: local branches, GitHub-only ones (cloud icon), tags, remotes and worktrees. `space` switch, `n` new, `M` merge into yours, `B` rebase yours onto it, `R` rename, `D` delete, `u` follow a GitHub branch, `w` worktree, `A` add a remote.
 
-For a repo on this PC, **Branches** and **Commits** show your local Git (GitHub-only branches too, marked with a cloud):
+Anything that can't be undone asks first, in the bottom bar.
 
-- Branches: `space` switch, `enter` its commits, `n` new, `M` merge into yours, `B` rebase yours onto it, `R` rename, `D` delete, `u` follow a GitHub branch, `P` push a tag, `b` browse its code.
-- Commits (with the graph, `↑` = not pushed): `enter` changes, `C` cherry-pick, `t` revert, `X` reset (soft / mixed / hard), `T` tag, `y` copy id, `space` check out.
-- Changes: `enter` on a file, then `j` / `k` pick a line and `space` stages just that line (`a` the hunk). `s` stashes your changes, `S` chooses what; stashes sit at the bottom (`enter`: pop / apply / drop / branch).
-- Rebase: on a commit in Commits, `i` plans an interactive rebase from there (`p` pick, `s` squash, `f` fixup, `r` reword, `d` drop, `J` / `K` move, `enter` runs it). Quick ones: `S` squash / `F` fixup into the commit below, `R` reword, `D` drop.
-- Conflicts: files marked `U` in Changes. `enter`, then `o` keeps the top, `t` the bottom, `b` both; `O` / `T` for the whole file; `e` fixes it in Nvim. Then Continue (button, or `ctrl+p`) or Abort.
-- Remotes and worktrees are listed at the bottom of Branches: `A` add a remote; on one `f` fetch, `E` URL, `R` rename, `D` remove. `w` on a branch opens it in its own folder (worktree); on a worktree `e` Nvim, `L` lazygit, `D` remove.
+## Issues and pull requests
 
-## Pull requests
+- Issues: `enter` reads the conversation full screen, `C` comment, `N` new, `x` close / reopen, `t` labels, `E` edit. Text is written in your editor: save and quit, then confirm.
+- PRs: views **Overview · Comments · Commits · Checks · Files** (`[` `]`, or `{` `}` inside a repo). `m` merge (squash / merge / rebase, keep or delete the branch), `R` review (approve / request changes / comment), `C` comment, `K` check out on this PC, `x` close / reopen, `N` new PR.
+- The **Comments** view has every comment, review and comment on code as a card: `tab` into it, `j`/`k` pick, `r` reply, `x` resolve, `+` react, `enter` jump to the code.
 
-- **PRs tab** (`4`): PRs in your repos. `f` switches Your repos / Review requests / Created / Involved, `s` open / closed+merged.
-- Inside a repo: the **PRs** section.
-- **Comments** view: every comment, review and comment on code as a card. Focus the panel (`tab`), `j` / `k` pick one, `r` reply, `x` resolve, `+` react, `enter` jump to the code.
-- Views on the right: Overview, Comments, Commits, Checks, Files: `[` / `]` (in a repo `{` / `}`), or click them.
-- `enter` shows the view full screen (Files: every file is a heading; Checks: the failing check's logs).
-- `m` merge (squash / merge commit / rebase, keep or delete the branch), `R` review, `C` comment, `x` close / reopen, `K` check out locally, `N` new PR.
+## Actions and releases
 
-## Issues
-
-- **Issues tab** (`3`): issues in your repos (and the shared / org repos in your list). `f` switches Your repos / Involved / Assigned / Created, `s` open / closed.
-- Inside a repo: the **Issues** section.
-- `enter` reads the whole conversation full screen (each message is a heading in Contents).
-- `C` comment, `N` new issue, `E` edit the description: written in Nvim (save and quit, then confirm).
-- `x` close / reopen, `t` labels (pick one to add or remove it).
-
-## Back (esc)
-
-`esc` always goes one step back along the path at the top: preview → list, search → cleared,
-a section (Issues, Commits…) → the repo's Code, a folder → its parent, the repo → the repo list.
-
-## Actions and Releases
-
-- **Actions tab** (`5`): CI runs of your recent repos. Running ones first, then the ones still broken, then the rest. `f` switches All / Failed / Running.
-- Inside a repo: the **Actions** and **Releases** sections (`[` / `]`).
-- `enter` on a run opens its logs in the reader: jobs and steps are headings, it opens at the first error.
-- `R` re-run (failed jobs only if it failed), `x` cancel, `w` start a workflow by hand.
-- Running runs update by themselves every 5 seconds.
-- Releases: `enter` reads the notes, `d` downloads files to Downloads, `N` makes a new release (notes written in Nvim or made from the commits).
+- Runs: jobs and steps on the right (running runs update every 5 seconds). `enter` opens the logs with jobs and steps as headings, at the first error. `R` re-run (failed jobs only if it failed), `x` cancel, `w` start a workflow by hand.
+- Releases: `enter` reads the notes, `d` downloads its files, `N` new release (notes in your editor or made from the commits).
 
 ## Reader
 
-Markdown is drawn like render-markdown.nvim: heading bars with icons, `□` / `■` checkboxes
-(done ones faded), code blocks with the language on top, tables, quotes and GitHub callouts.
+Full screen (`v`, or `enter` on markdown): markdown drawn like render-markdown.nvim (heading bars,
+`□` / `■` checkboxes, code blocks, tables, callouts), a **Contents** panel (`t`, click to jump),
+`]` / `[` next / previous heading, `/` find, `e` edit. `termgit notes.md` opens any file on this PC
+and reloads it when you save it.
 
-- `termgit notes.md` opens any file on this PC full screen; it reloads when you save the file.
-- `]` / `[` next / previous heading, `t` Contents panel (click a heading), `/` find, `n` / `N` matches, `e` edit in Nvim.
+## Keys
 
-## Build
+`?` shows every key, by screen, full screen with Contents. The basics:
+
+| Key | Does |
+| --- | --- |
+| `1`–`7` | tabs (or click) |
+| `ctrl+p` / `:` | command palette: type what you want to do |
+| `j` `k`, arrows, wheel | move / scroll |
+| `enter`, double-click | open |
+| `tab` `h` `l` | list ↔ right panel |
+| `esc` | back one step |
+| `v` | full screen |
+| `/` | filter / find / search |
+| `o` / `y` | browser / copy the link |
+| `r` | refresh |
+| `q` | quit |
+
+## Settings
+
+`ctrl+p → Settings` opens the settings file in your editor; saving applies it. It lives at
+`%APPDATA%\termgit\config.txt` (`termgit --config` prints the path):
+
+```
+start_tab = home          # home, repos, issues, prs, actions, inbox, explore
+home_layout = dashboard   # or panels
+clone_into = ~\Documents\Coding
+look_in = ~\Documents\Coding ; ~\apps    # where your clones are found
+editor = nvim             # e.g. code -w
+git_tool = lazygit        # the L key
+notify_every = 60         # seconds
+```
+
+Data from GitHub is cached in `%LOCALAPPDATA%\termgit`, so TermGit opens instantly and refreshes in the background.
+
+## Build and test
 
 ```
 go build -o termgit.exe .
 copy termgit.exe %USERPROFILE%\.local\bin\
+go test ./...
 ```
 
-Test without a terminal: `termgit --dump 140x40 j enter click:10,5` prints one screen.
-
-Badges on repos cloned on this PC: folder = cloned, `●` uncommitted changes, `↑2` not pushed, `↓3` new commits on GitHub.
-
-Data is cached in `%LOCALAPPDATA%\termgit`.
+`termgit --dump 140x40 2 enter click:10,5` runs TermGit without a terminal and prints one screen (keys, `click:x,y`, `wheel:x,y`).
+Every batch is tagged (`batch-1` … `batch-12`), so any of them can be rolled back.
