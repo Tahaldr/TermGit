@@ -14,47 +14,12 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const version = "1.1.0"
+const version = "2.0.0"
 
 func main() {
 	cfg = loadConfig()
 	cloneRoot, localRoots = cfg.cloneInto, cfg.lookIn
-	args := os.Args[1:]
-	if len(args) > 0 {
-		switch args[0] {
-		case "--version", "-v":
-			fmt.Println("termgit", version)
-			return
-		case "--dump":
-			// test helper: termgit --dump 140x40 [keys or click:x,y / wheel:x,y,up|down ...]
-			dump(args[1:])
-			return
-		case "--config":
-			fmt.Println(configPath())
-			return
-		case "--help", "-h":
-			fmt.Println("termgit            GitHub in the terminal")
-			fmt.Println("termgit FILE       read a file (markdown or code) full screen; reloads when it changes")
-			fmt.Println("termgit --config   where the settings file is (ctrl+p → Settings edits it)")
-			fmt.Println("termgit --version")
-			return
-		}
-		// termgit notes.md: open the reader on a file
-		rd, err := loadFileReader(args[0])
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "termgit:", err)
-			os.Exit(1)
-		}
-		m := newSoloModel(rd)
-		if _, err := tea.NewProgram(m).Run(); err != nil {
-			fmt.Fprintln(os.Stderr, "termgit:", err)
-			os.Exit(1)
-		}
-		return
-	}
-	if _, err := tea.NewProgram(newModel()).Run(); err != nil {
-		crashed(err)
-	}
+	runCLI(os.Args[1:])
 }
 
 // crashed keeps the error on screen (and in a file) instead of the window just closing

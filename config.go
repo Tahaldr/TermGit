@@ -30,8 +30,8 @@ func defaultConfig() config {
 	return config{
 		startTab:   "home",
 		homeLayout: "dashboard",
-		cloneInto:  home("Documents", "Coding"),
-		lookIn:     []string{home("Documents", "Coding"), home("apps"), filepath.Join(os.Getenv("LOCALAPPDATA"), "nvim")},
+		cloneInto:  home("code"),
+		lookIn:     []string{home("code"), home("projects"), home("src"), home("repos"), home("Documents", "GitHub")},
 		editor:     "nvim",
 		gitTool:    "lazygit",
 		notify:     60,
@@ -217,4 +217,15 @@ func (m *model) onConfigDone(msg configDoneMsg) tea.Cmd {
 	m.homeGrid = cfg.homeLayout != "panels"
 	m.local = scanLocal(localRoots)
 	return tea.Batch(m.setStatus("Settings saved and applied", false), m.scanLocalInfo())
+}
+
+// edName / gitName: the editor and git tool as shown in hints and buttons
+func edName() string {
+	n := filepath.Base(strings.Fields(cfg.editor + " nvim")[0])
+	return strings.TrimSuffix(n, filepath.Ext(n))
+}
+
+func gitName() string {
+	n := filepath.Base(strings.Fields(cfg.gitTool + " lazygit")[0])
+	return strings.TrimSuffix(n, filepath.Ext(n))
 }

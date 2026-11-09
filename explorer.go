@@ -1362,7 +1362,7 @@ func (m *model) localLine(r *Repo, w int) []string {
 	}
 	h := [][2]string{{"L", "lazygit to commit or push"}}
 	if li.behind > 0 || li.missing {
-		h = [][2]string{{"p", "pull"}, {"L", "lazygit"}}
+		h = [][2]string{{"p", "pull"}, {"L", gitName()}}
 	}
 	return append(wrapJoin(parts, "   ", w), hints(h))
 }

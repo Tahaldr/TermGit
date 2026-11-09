@@ -122,6 +122,7 @@ type model struct {
 	linkZones []linkZone // ctrl+click links on the current screen
 	hx, hy    int        // where the mouse pointer is (links under it are underlined)
 	spinning  bool
+	first     func(m *model) tea.Cmd
 	spinN     int
 	homeLeft  bool // a followed link opened a page in TermGit (not the browser)
 	expUsers  map[string]*userSearch
@@ -456,6 +457,11 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
+		if f := m.first; f != nil { // what the command line asked for (termgit OWNER/REPO, …)
+			m.first = nil
+			m.ensureVisible()
+			return m, f(m)
+		}
 		m.ensureVisible()
 	case reposMsg:
 		m.loading = false
@@ -1513,7 +1519,7 @@ func (m *model) buttons() []button {
 	} else {
 		b = append(b, button{icRead + " Full screen", "v", "read"})
 	}
-	b = append(b, button{icNvim + " Nvim", "e", "nvim"}, button{icGit + " lazygit", "L", "lazygit"},
+	b = append(b, button{icNvim + " " + edName(), "e", "nvim"}, button{icGit + " " + gitName(), "L", "lazygit"},
 		button{icGlobe + " Browser", "o", "browser"}, button{icLink + " Copy link", "y", "copy"})
 	if m.localPath(r) == "" {
 		b = append(b, button{icDown + " Clone", "c", "clone"})

@@ -254,6 +254,6 @@ func home(p ...string) string {
 
 // Where clones go and where local repos are looked for (settings come in a later batch)
 var (
-	cloneRoot  = home("Documents", "Coding")
-	localRoots = []string{home("Documents", "Coding"), home("apps"), filepath.Join(os.Getenv("LOCALAPPDATA"), "nvim")}
+	cloneRoot  = home("code")
+	localRoots = []string{home("code")}
 )

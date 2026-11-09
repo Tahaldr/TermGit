@@ -1,0 +1,40 @@
+name: release
+
+# Pushing a tag like v2.0.0 builds TermGit for Windows, macOS and Linux
+# and attaches the programs to a GitHub release.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "ci"
+          go test ./...
+      - name: Build
+        run: |
+          mkdir dist
+          for target in windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os=${target%/*}; arch=${target#*/}; ext=""
+            [ "$os" = windows ] && ext=".exe"
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/termgit_${os}_${arch}${ext}" .
+          done
+          ls -l dist
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/* --title "TermGit ${{ github.ref_name }}" --generate-notes \
+            || gh release upload "${{ github.ref_name }}" dist/* --clobber

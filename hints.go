@@ -77,7 +77,7 @@ func (m *model) hintItems() []hint {
 		h = []hint{{"j/k", "scroll"}, {"ctrl+d/u", "page"}, {"g/G", "top/end"}, {"v", "full screen"}, {"esc", "back to list"}}
 	default:
 		h = []hint{{"j/k", "move"}, {"enter", "open repo"}, {"v", "read README"}, {"tab", "scroll README"}, {"/", "filter"},
-			{"e", "nvim"}, {"L", "lazygit"}}
+			{"e", edName()}, {"L", gitName()}}
 		if r := m.selected(); r != nil && m.localPath(r) != "" {
 			h = append(h, hint{"p", "pull"}, hint{"P", "push"})
 		} else {
@@ -99,9 +99,9 @@ func (m *model) exHints(ex *explorer) []hint {
 	switch ex.sec {
 	case secCode:
 		if m.focus == 1 {
-			return []hint{{"j/k", "scroll"}, {"ctrl+d/u", "page"}, {"v", "full screen"}, {"e", "nvim"}, {"o", "browser"}}
+			return []hint{{"j/k", "scroll"}, {"ctrl+d/u", "page"}, {"v", "full screen"}, {"e", edName()}, {"o", "browser"}}
 		}
-		h := []hint{{"j/k", "move"}, {"enter", "open"}, {"v", "full screen"}, {"e", "nvim"}, {"L", "lazygit"}}
+		h := []hint{{"j/k", "move"}, {"enter", "open"}, {"v", "full screen"}, {"e", edName()}, {"L", gitName()}}
 		if local {
 			h = append(h, hint{"p", "pull"}, hint{"P", "push"})
 		} else {
@@ -119,7 +119,7 @@ func (m *model) exHints(ex *explorer) []hint {
 		case c != nil && c.conflict() && m.focus == 1:
 			return []hint{{"j/k", "next conflict"}, {"o", "keep top"}, {"t", "keep bottom"}, {"b", "keep both"}, {"e", "fix in nvim"}}
 		case c != nil && c.conflict():
-			return []hint{{"enter", "fix conflicts"}, {"O", "keep all top"}, {"T", "keep all bottom"}, {"e", "nvim"}, {"ctrl+p", "continue / abort"}}
+			return []hint{{"enter", "fix conflicts"}, {"O", "keep all top"}, {"T", "keep all bottom"}, {"e", edName()}, {"ctrl+p", "continue / abort"}}
 		case c != nil && m.focus == 1:
 			return []hint{{"j/k", "pick a line"}, {"space", "stage / unstage the line"}, {"a", "the whole hunk"}}
 		case kind == "stash":
@@ -127,7 +127,7 @@ func (m *model) exHints(ex *explorer) []hint {
 		}
 		h := []hint{}
 		if c != nil {
-			h = append(h, hint{"space", "stage/unstage"}, hint{"enter", "pick lines"}, hint{"d", "discard"}, hint{"e", "nvim"})
+			h = append(h, hint{"space", "stage/unstage"}, hint{"enter", "pick lines"}, hint{"d", "discard"}, hint{"e", edName()})
 		}
 		h = append(h, hint{"a", "stage all"}, hint{"c", "commit"}, hint{"C", "commit in nvim"}, hint{"A", "amend"},
 			hint{"s", "stash"}, hint{"S", "stash…"}, hint{"p", "pull"}, hint{"P", "push"}, hint{"f", "fetch"})
@@ -157,7 +157,7 @@ func (m *model) exHints(ex *explorer) []hint {
 		case "remote":
 			return []hint{{"f", "fetch"}, {"E", "change URL"}, {"R", "rename"}, {"D", "remove"}, {"A", "add a remote"}}
 		case "worktree":
-			return []hint{{"e", "nvim"}, {"L", "lazygit"}, {"D", "remove"}}
+			return []hint{{"e", edName()}, {"L", gitName()}, {"D", "remove"}}
 		case "lbranch":
 			b := it.lb
 			switch {

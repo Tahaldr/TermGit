@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Muted onedark, the same values as the hub and NvChad.
+// Muted onedark colors.
 var (
 	cAcc    = lipgloss.Color("#61afef") // accent: focus, selection, keys
 	cTxt    = lipgloss.Color("#abb2bf") // normal text

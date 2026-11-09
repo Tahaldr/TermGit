@@ -610,7 +610,7 @@ func (m *model) chButtons() []button {
 		b = append(b, button{icCheck + " Continue " + st, "ctrl+p", "gitcontinue"}, button{icClose + " Abort", "ctrl+p", "gitabort"})
 	}
 	b = append(b, button{"Stage all", "a", "stageall"}, button{icCommit + " Commit", "c", "commit"},
-		button{icDown + " Pull", "p", "pull"}, button{icUp + " Push", "P", "push"}, button{icNvim + " Nvim", "e", "nvim"})
+		button{icDown + " Pull", "p", "pull"}, button{icUp + " Push", "P", "push"}, button{icNvim + " " + edName(), "e", "nvim"})
 	return b
 }
 

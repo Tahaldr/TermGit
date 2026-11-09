@@ -1,127 +1,202 @@
 # TermGit
 
-GitHub and Git in one terminal app: your repos, code, changes, branches, history, issues,
-pull requests, CI, releases, notifications and GitHub search. Every action has a key and a
-clickable button, and the keys for what you're looking at are always in the bar at the bottom.
-Muted onedark colors, Nerd Font icons.
+**GitHub and Git in one terminal app.** Browse your repos and code, stage and commit, rebase,
+review and merge pull requests, read CI logs, answer issues, clear your notifications and search
+all of GitHub — without leaving the terminal and without remembering commands.
 
-TermGit does everything lazygit does for your repos on this PC; lazygit stays one key away (`L`).
+- Works **fully by keyboard or fully by mouse**: every action has a key *and* a clickable button.
+- The keys for whatever you're looking at are **always shown at the bottom** (`?` lists all of them).
+- Questions and inputs appear in **popups** (like Nvim's command line); anything risky asks first.
+- Does everything **lazygit** does for repos on your computer, and everything you'd normally open
+  **github.com** for.
+- One small program. Logs in through the official GitHub CLI and **never stores a token**.
+
+```
+ 1 󰋜 Home   2  Repos   3  Issues   4  PRs   5  Actions   6  Inbox 3   7  Explore
+ Repos › you/project ›  main › Changes                                     ⠋ loading…
+╭─  Code   Changes   Issues   PRs  …  ───────╮╭─ app.go ──────────────────────────────────╮
+│ M  app.go                                     ││ app.go · not staged                       │
+│  ? notes.md                                   ││ space stage · d discard · c commit        │
+│ M  ui/view.go                                 ││ ────────────────────────────────────────  │
+│                                               ││ @@ -12,6 +12,7 @@ func main() {           │
+│                                               ││ +    loadConfig()                         │
+╰─────────────────────────  main ↑1 · 0 staged ─╯╰───────────────────────────────────────────╯
+  Stage space   Discard d   Commit c   Pull p   Push P
+ space stage/unstage · enter pick lines · d discard · c commit · s stash · p pull · P push · ? all keys
+```
+
+## Contents
 
 - [Install](#install)
-- [The tabs](#the-tabs)
-- [Inside a repo](#inside-a-repo)
-- [Git on this PC](#git-on-this-pc)
-- [Issues and pull requests](#issues-and-pull-requests)
-- [Actions and releases](#actions-and-releases)
-- [Reader](#reader)
+- [First start](#first-start)
+- [What you can do](#what-you-can-do)
+- [The command line](#the-command-line)
 - [Keys](#keys)
 - [Settings](#settings)
-- [Build and test](#build-and-test)
+- [FAQ](#faq)
+- [Building from source](#building-from-source)
 
 ## Install
 
-1. Install the [GitHub CLI](https://cli.github.com) and log in once: `gh auth login`.
-   TermGit uses that login and never stores a token.
-2. Install a [Nerd Font](https://www.nerdfonts.com) and pick it in your terminal (for the icons).
-3. Build TermGit (see [Build](#build-and-test)) and put `termgit.exe` on your PATH.
-4. Run `termgit`. Optional: Nvim and lazygit (both can be changed in the [settings](#settings)).
+You need:
 
-## The tabs
+| What | Why | Get it |
+| --- | --- | --- |
+| **GitHub CLI** (`gh`) | TermGit logs in through it | Windows `winget install --id GitHub.cli` · macOS `brew install gh` · [Linux](https://github.com/cli/cli#installation) |
+| **git** | for repos on your computer | [git-scm.com](https://git-scm.com/downloads) |
+| a **Nerd Font** in your terminal | the icons | [nerdfonts.com](https://www.nerdfonts.com) (e.g. JetBrainsMono Nerd Font) |
+| an editor *(optional)* | writing comments, commit messages | Nvim by default, any editor works ([settings](#settings)) |
 
-| Tab | What's there |
+Then get TermGit:
+
+- **Download** the program for your system from the [Releases](../../releases) page
+  (`termgit_windows_amd64.exe`, `termgit_darwin_arm64`, `termgit_linux_amd64`, …), rename it to
+  `termgit` (`termgit.exe` on Windows) and put it in a folder on your `PATH`.
+- **Or with Go** (1.27+): `go install github.com/Tahaldr/termgit@latest`
+
+## First start
+
+```
+termgit login     # logs you in to GitHub with the permissions TermGit uses (a browser page opens)
+termgit doctor    # checks that everything is in place
+termgit           # start
+```
+
+If you run `termgit` without being logged in, it offers to log you in. TermGit uses the same login
+as `gh`, so if you already use the GitHub CLI there's nothing to do. `GH_TOKEN` / `GITHUB_TOKEN`
+environment variables work too.
+
+## What you can do
+
+**Home** — a dashboard: your contribution graph and streak, and **Needs you**: failing CI, reviews
+asked of you, your open PRs, issues assigned to you, repos on your computer with changes to commit,
+push or pull, and unread notifications. Quick keys act right there (`R` re-run, `m` merge, `c` commit,
+`p` / `P` pull / push). `enter` opens the item's page.
+
+**Repos** — all your repos (yours, shared, organizations), with badges for the ones cloned on your
+computer: changes not committed `●`, commits to push `↑`, commits to pull `↓`. Create, rename,
+describe, change visibility, archive or delete a repo; star, fork, clone.
+
+**Inside a repo** — sections you switch with `[` `]`:
+
+| Section | |
 | --- | --- |
-| **1 Home** | Number tiles (contributions, streak, this week, your PRs, CI), your contribution graph, **Needs you** (failing CI, reviews asked of you, your PRs, assigned issues, repos on this PC with work to commit / push / pull, unread notifications, recent repos) and your activity by day. Rows have quick keys: `R` re-run / review, `m` merge, `c` `p` `P` commit / pull / push, `M` mark all read, `alt+1–5` recent repos. `t` switches to a two-panel layout. |
-| **2 Repos** | Your repos (yours, shared and org ones) with badges for the ones on this PC: folder, `●` changes, `↑` to push, `↓` to pull. README preview. `N` new repo, `R` rename, `E` description, `V` visibility, `A` archive, `D` delete (type the name), `c` clone, `s` star, `F` fork. |
-| **3 Issues** | Issues across your repos: your repos / involved / assigned / created (`f`), open or closed (`s`). |
-| **4 PRs** | Pull requests across your repos: your repos / review requests / created / involved. |
-| **5 Actions** | CI runs: running first, then still-broken ones, then the rest (`f`: all / failed / running). |
-| **6 Inbox** | Notifications (the tab shows the unread count). `enter` opens the item's page in TermGit and marks it read, `v` reads it full screen, `m` / `M` mark read, `x` unsubscribe. |
-| **7 Explore** | Your starred repos, or search all of GitHub for repos, issues, code or users (`/`, with GitHub's search words like `language:go stars:>500`). Open any repo, star, fork, clone; open a user's profile (bio, followers, pinned and all repos), follow them. `esc` steps back. |
+| **Code** | browse folders, read files with syntax colors, markdown rendered; find any file with `/` |
+| **Changes** | every changed file and its diff; stage files or **single lines**; discard; commit (message in a popup or your editor); amend; stash; pull, push, fetch; fix **merge conflicts** (keep top / bottom / both) |
+| **Issues** | read conversations, comment, create, close / reopen, labels, edit |
+| **PRs** | Overview · **Comments** (reply, resolve, react) · Commits · Checks · Files; merge (squash / merge / rebase), review, check out locally, create |
+| **Commits** | the history with a graph; **interactive rebase** (pick / squash / fixup / reword / drop / reorder), cherry-pick, revert, reset, tag |
+| **Branches** | switch, create, rename, delete, merge, rebase, follow a GitHub branch; tags; remotes; worktrees |
+| **Actions** | CI runs live; logs with jobs and steps as headings, opening at the first error; re-run, cancel, start a workflow |
+| **Releases** | read notes, download files, publish a release |
 
-From Home and the Inbox, `enter` jumps to the item's normal page (its repo, section, item highlighted); `esc` comes back.
+**Issues / PRs / Actions tabs** — the same, across all your repos.
 
-## Inside a repo
+**Inbox** — your notifications; `enter` opens the issue, PR or CI run inside TermGit and marks it read.
 
-`enter` on a repo opens it. Sections (`[` `]` or click): **Code · Changes · Issues · PRs · Commits · Branches · Actions · Releases**.
+**Explore** — your stars, or search all of GitHub for **repos, issues, code or users** (GitHub's search
+words work: `language:go stars:>500`, `user:name`, …). Open any repo, see anyone's profile and repos,
+follow people.
 
-- **Code**: folders and files with syntax colors, markdown rendered; `/` finds a file anywhere; `e` opens it in your editor.
-- The path at the top is clickable, and `esc` goes one step back along it.
+**Reader** — full screen (`v`) for READMEs, files, conversations and logs, with a Contents panel to jump
+between headings and `/` to find. `termgit notes.md` reads any file on your computer and reloads it
+when you save.
 
-## Git on this PC
+**Links** — ctrl+click any link: GitHub links open inside TermGit (repos, files, issues, PRs, profiles),
+others in your browser.
 
-For repos cloned on this PC the sections show your local Git (same keys as lazygit):
+## The command line
 
-- **Changes**: `space` stage / unstage, `a` all, `enter` then `j`/`k` + `space` stages single lines (`a` the hunk), `d` discard, `c` commit (`C` in your editor), `A` amend, `s` / `S` stash (stashes are listed at the bottom), `p` pull (fast-forward only), `P` push (first push links the branch; offers force-with-lease when needed), `f` fetch.
-- **Conflicts** (files marked `U`): `enter`, then `o` keeps the top, `t` the bottom, `b` both; `O` / `T` for the whole file; then Continue or Abort (buttons, or `ctrl+p`).
-- **Commits**: your history with the graph (`↑` = not pushed). `i` interactive rebase from a commit (pick / squash / fixup / reword / drop / move, nothing runs until `enter`), `S` `F` `R` `D` quick squash / fixup / reword / drop, `C` cherry-pick, `t` revert, `X` reset (soft / mixed / hard), `T` tag, `y` copy id.
-- **Branches**: local branches, GitHub-only ones (cloud icon), tags, remotes and worktrees. `space` switch, `n` new, `M` merge into yours, `B` rebase yours onto it, `R` rename, `D` delete, `u` follow a GitHub branch, `w` worktree, `A` add a remote.
+```
+termgit                    open TermGit
+termgit TAB                open on a tab: home, repos, issues, prs, actions, inbox, explore
+termgit .                  open the GitHub repo of this folder (its Changes if it has some)
+termgit OWNER/REPO         open a repo, e.g. termgit charmbracelet/bubbletea
+termgit FILE               read a file full screen
+termgit search QUERY       search GitHub repos
+termgit user LOGIN         open someone's profile
 
-Anything that can't be undone asks first, in the bottom bar.
-
-## Issues and pull requests
-
-- Issues: `enter` reads the conversation full screen, `C` comment, `N` new, `x` close / reopen, `t` labels, `E` edit. Text is written in your editor: save and quit, then confirm.
-- PRs: views **Overview · Comments · Commits · Checks · Files** (`[` `]`, or `{` `}` inside a repo). `m` merge (squash / merge / rebase, keep or delete the branch), `R` review (approve / request changes / comment), `C` comment, `K` check out on this PC, `x` close / reopen, `N` new PR.
-- The **Comments** view has every comment, review and comment on code as a card: `tab` into it, `j`/`k` pick, `r` reply, `x` resolve, `+` react, `enter` jump to the code.
-
-## Actions and releases
-
-- Runs: jobs and steps on the right (running runs update every 5 seconds). `enter` opens the logs with jobs and steps as headings, at the first error. `R` re-run (failed jobs only if it failed), `x` cancel, `w` start a workflow by hand.
-- Releases: `enter` reads the notes, `d` downloads its files, `N` new release (notes in your editor or made from the commits).
-
-## Reader
-
-**Links**: ctrl+click any link (in READMEs, files, comments, logs). GitHub links open inside TermGit (repo, file, issue, PR, profile), links to other files of the repo open that file, the rest open in the browser.
-
-Full screen (`v`, or `enter` on markdown): markdown drawn like render-markdown.nvim (heading bars,
-`□` / `■` checkboxes, code blocks, tables, callouts), a **Contents** panel (`t`, click to jump),
-`]` / `[` next / previous heading, `/` find, `e` edit. `termgit notes.md` opens any file on this PC
-and reloads it when you save it.
+termgit login              log in (adds the permissions TermGit uses if you're already logged in)
+termgit logout             log out
+termgit doctor             check your setup
+termgit config             open the settings in your editor
+termgit config path        print where the settings file is
+termgit version            print the version
+termgit help               all of this (-h, --help)
+```
 
 ## Keys
 
-`?` shows every key, by screen, full screen with Contents. The basics:
+You never need to learn these: the bar at the bottom always shows the keys for the current screen and
+the highlighted item, `?` shows all of them (with search), and `ctrl+p` opens a command palette where
+you type what you want to do.
 
 | Key | Does |
 | --- | --- |
-| `1`–`7` | tabs (or click) |
-| `ctrl+p` / `:` | command palette: type what you want to do |
-| `j` `k`, arrows, wheel | move / scroll |
-| `enter`, double-click | open |
+| `1` – `7` | tabs |
+| `j` `k` / arrows / mouse wheel | move, scroll |
+| `enter` / double-click | open |
 | `tab` `h` `l` | list ↔ right panel |
-| `esc` | back one step |
+| `esc` | one step back |
+| `/` | filter, find, search |
 | `v` | full screen |
-| `/` | filter / find / search |
-| `o` / `y` | browser / copy the link |
+| `e` / `L` | open in your editor / git tool |
+| `o` / `y` | open in the browser / copy the link |
 | `r` | refresh |
+| `ctrl+p` | command palette |
+| `?` | every key |
 | `q` | quit |
 
 ## Settings
 
-`ctrl+p → Settings` opens the settings file in your editor; saving applies it. It lives at
-`%APPDATA%\termgit\config.txt` (`termgit --config` prints the path):
+`termgit config` (or `ctrl+p` → Settings) opens the settings file; it's applied as soon as you save.
 
 ```
 start_tab = home          # home, repos, issues, prs, actions, inbox, explore
-home_layout = dashboard   # or panels
-clone_into = ~\Documents\Coding
-look_in = ~\Documents\Coding ; ~\apps    # where your clones are found
-editor = nvim             # e.g. code -w
-git_tool = lazygit        # the L key
-notify_every = 60         # seconds
+home_layout = dashboard   # or panels (t on Home switches)
+clone_into = ~/code       # where repos get cloned
+look_in = ~/code ; ~/projects ; ~/src ; ~/repos ; ~/Documents/GitHub   # where your clones are found
+editor = nvim             # e.g.  code -w  ·  vim  ·  hx  ·  notepad
+git_tool = lazygit        # what L opens
+notify_every = 60         # seconds between notification checks
 ```
 
-Deleting repos and following people need two extra GitHub permissions; TermGit asks for them the first time (a browser page to approve), or `ctrl+p → Give TermGit more GitHub permissions`.
+The file is `%APPDATA%\termgit\config.txt` on Windows, `~/.config/termgit/config.txt` on Linux and
+`~/Library/Application Support/termgit/config.txt` on macOS. GitHub data is cached so TermGit opens
+instantly and refreshes in the background.
 
-Data from GitHub is cached in `%LOCALAPPDATA%\termgit`, so TermGit opens instantly and refreshes in the background.
+## FAQ
 
-## Build and test
+**Is my token safe?** TermGit never sees or saves it; the GitHub CLI keeps it in your system's
+credential store and TermGit asks it for each request.
+
+**Why does it ask for extra permissions?** Deleting repos (`delete_repo`) and following people
+(`user:follow`) need permissions a default `gh` login doesn't have. TermGit asks the first time you use
+them, or run `termgit login` once.
+
+**The icons are boxes / question marks.** Pick a Nerd Font in your terminal settings.
+
+**Do I still need lazygit?** No. Everything is in TermGit; `L` opens lazygit (or the git tool you set)
+if you like to have it.
+
+**My clones don't show the folder badge.** Add the folder that holds them to `look_in` in the settings.
+
+**Something broke.** If TermGit stops on an error, the message stays on screen and is saved to
+`crash.log` in its cache folder (`termgit doctor` shows where). Please open an issue with it.
+
+## Building from source
 
 ```
-go build -o termgit.exe .
-copy termgit.exe %USERPROFILE%\.local\bin\
+git clone https://github.com/Tahaldr/termgit
+cd termgit
+go build -o termgit .          # termgit.exe on Windows
 go test ./...
 ```
 
-`termgit --dump 140x40 2 enter click:10,5` runs TermGit without a terminal and prints one screen (keys, `click:x,y`, `wheel:x,y`).
-Every batch is tagged (`batch-1` … `batch-12`), so any of them can be rolled back.
+`termgit --dump 140x40 2 enter` runs TermGit without a terminal and prints one screen (keys,
+`click:x,y`, `ctrlclick:x,y`, `wheel:x,y`) — handy for tests. Pushing a `v*` tag builds the release
+programs for every system (`.github/workflows/release.yml`).
+
+Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Lip Gloss](https://github.com/charmbracelet/lipgloss),
+[go-gh](https://github.com/cli/go-gh), [goldmark](https://github.com/yuin/goldmark) and
+[Chroma](https://github.com/alecthomas/chroma). MIT license.

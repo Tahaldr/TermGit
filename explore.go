@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -517,7 +518,7 @@ func (m *model) cloneRepo(r *Repo) tea.Cmd {
 	if p := m.localPath(r); p != "" {
 		return m.setStatus("Already on this PC: "+p, false)
 	}
-	dest := home("Documents", "Coding", r.Name)
+	dest := filepath.Join(cloneRoot, r.Name)
 	nwo := r.NameWithOwner
 	m.prompt = &prompt{label: "Clone " + nwo + " into " + dest + "?", confirm: true, done: func(m *model, _ string) tea.Cmd {
 		c := exec.Command("gh", "repo", "clone", nwo, dest)

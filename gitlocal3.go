@@ -661,7 +661,7 @@ func (m *model) worktreePreview(t *worktree, w int) []string {
 	out := []string{fg(cAcc).Bold(true).Render(icFolder + " worktree: " + t.branch), fg(cMut).Render(t.path), "",
 		fg(cMut).Render("A worktree is a second folder of the same repo with another branch checked out,"),
 		fg(cMut).Render("so you can work on two branches at once without stashing."), ""}
-	h := [][2]string{{"e", "open in Nvim"}, {"L", "lazygit"}}
+	h := [][2]string{{"e", "open in Nvim"}, {"L", gitName()}}
 	if !t.main {
 		h = append(h, [2]string{"D", "remove"})
 	}

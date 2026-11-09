@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -64,7 +65,7 @@ func (m *model) repoNewDesc(name, vis string) tea.Cmd {
 		if desc != "" {
 			base = append(base, "--description", desc)
 		}
-		dest := home("Documents", "Coding", name)
+		dest := filepath.Join(cloneRoot, name)
 		m.openPicker("Create "+name, []command{
 			{"Empty repo on GitHub", "", func(m *model) tea.Cmd { return m.ghRepo("Created "+name, base...) }},
 			{"Empty repo, and clone it into " + tildePath(dest), "", func(m *model) tea.Cmd {
