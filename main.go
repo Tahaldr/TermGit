@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const version = "2.0.0"
+const version = "2.0.1"
 
 func main() {
 	cfg = loadConfig()

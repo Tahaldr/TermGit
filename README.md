@@ -52,7 +52,7 @@ Then get TermGit:
 - **Download** the program for your system from the [Releases](../../releases) page
   (`termgit_windows_amd64.exe`, `termgit_darwin_arm64`, `termgit_linux_amd64`, …), rename it to
   `termgit` (`termgit.exe` on Windows) and put it in a folder on your `PATH`.
-- **Or with Go** (1.27+): `go install github.com/Tahaldr/termgit@latest`
+- **Or with Go** (1.27+): `go install github.com/Tahaldr/termgit/v2@latest`
 
 ## First start
 
