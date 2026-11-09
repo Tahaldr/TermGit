@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -208,5 +209,28 @@ func TestConfigRoundTrip(t *testing.T) {
 	data, _ := os.ReadFile(p)
 	if !strings.Contains(string(data), "start_tab = repos") || !strings.Contains(string(data), "editor = code -w") {
 		t.Fatalf("config file:\n%s", data)
+	}
+}
+
+// every screen must draw before anything has loaded (the first frame of a real start)
+func TestFirstFrameEveryTab(t *testing.T) {
+	for _, size := range [][2]int{{70, 16}, {120, 30}, {200, 60}} {
+		for tab := range tabs {
+			m := newModel()
+			m.dump = true
+			m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+			m.tab = tab
+			for _, grid := range []bool{true, false} {
+				m.homeGrid = grid
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							t.Errorf("tab %d at %dx%d (grid=%v) crashed: %v", tab, size[0], size[1], grid, r)
+						}
+					}()
+					m.View()
+				}()
+			}
+		}
 	}
 }

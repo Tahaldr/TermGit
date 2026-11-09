@@ -646,7 +646,7 @@ func (m *model) homeGridRender(ph int) []string {
 	if rest >= 20 {
 		g := m.contribLines(w - 4)
 		gw := 0
-		for _, l := range g[:len(g)-2] {
+		for _, l := range g[:max(0, len(g)-2)] { // (the graph may still be loading: 1 line) // (the graph may still be loading: 1 line)
 			gw = max(gw, width(l))
 		}
 		if padL := (w - 4 - gw) / 2; padL > 0 { // center the graph

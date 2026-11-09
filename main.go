@@ -2,16 +2,19 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
-const version = "1.0.0"
+const version = "1.0.1"
 
 func main() {
 	cfg = loadConfig()
@@ -50,9 +53,18 @@ func main() {
 		return
 	}
 	if _, err := tea.NewProgram(newModel()).Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "termgit:", err)
-		os.Exit(1)
+		crashed(err)
 	}
+}
+
+// crashed keeps the error on screen (and in a file) instead of the window just closing
+func crashed(err error) {
+	log := filepath.Join(cacheDir(), "crash.log")
+	os.WriteFile(log, []byte(time.Now().Format(time.RFC3339)+"\n"+err.Error()+"\n"), 0o644)
+	fmt.Fprintln(os.Stderr, "\ntermgit stopped because of an error:\n  "+err.Error())
+	fmt.Fprintln(os.Stderr, "\nIt's saved in "+log+". Press enter to close.")
+	bufio.NewReader(os.Stdin).ReadString('\n')
+	os.Exit(1)
 }
 
 // ---- headless test mode: runs the app without a terminal and prints one screen ----
