@@ -31,6 +31,7 @@ all of GitHub — without leaving the terminal and without remembering commands.
 - [First start](#first-start)
 - [What you can do](#what-you-can-do)
 - [The command line](#the-command-line)
+- [Updating](#updating)
 - [Keys](#keys)
 - [Settings](#settings)
 - [FAQ](#faq)
@@ -118,12 +119,26 @@ termgit user LOGIN         open someone's profile
 
 termgit login              log in (adds the permissions TermGit uses if you're already logged in)
 termgit logout             log out
+termgit update             update to the newest version (--check only checks)
 termgit doctor             check your setup
 termgit config             open the settings in your editor
 termgit config path        print where the settings file is
 termgit version            print the version
 termgit help               all of this (-h, --help)
 ```
+
+## Updating
+
+```
+termgit update            # downloads the newest version for your system and replaces the program
+termgit update --check    # only tells you if there's a newer one
+```
+
+TermGit also checks once a day and shows a green arrow with the new version at the top right — click
+it to update. If you installed with Go, `go install github.com/Tahaldr/termgit/v2@latest` works too.
+
+**Your settings and data are never touched by an update**: they live in their own folders (see
+[Settings](#settings)), apart from the program.
 
 ## Keys
 

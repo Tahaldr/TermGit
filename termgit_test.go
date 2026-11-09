@@ -234,3 +234,17 @@ func TestFirstFrameEveryTab(t *testing.T) {
 		}
 	}
 }
+
+func TestNewerVersion(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{{"v2.1.0", "2.0.9", true}, {"2.0.1", "v2.0.1", false}, {"v2.0.10", "2.0.9", true}, {"1.9.9", "2.0.0", false}, {"v3.0.0-beta", "2.9.9", true}} {
+		if got := newer(c.a, c.b); got != c.want {
+			t.Errorf("newer(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+	if !strings.HasPrefix(assetName(), "termgit_") {
+		t.Errorf("assetName = %q", assetName())
+	}
+}

@@ -27,6 +27,8 @@ Usage:
 
   termgit login              log in to GitHub (through the GitHub CLI) with what TermGit needs
   termgit logout             log out
+  termgit update             update to the newest version (your settings stay as they are)
+  termgit update --check     only check whether there's a newer version
   termgit doctor             check that everything TermGit uses is set up
   termgit config             open the settings file in your editor
   termgit config path        print where the settings file is
@@ -43,6 +45,7 @@ var loginScopes = "repo,read:org,workflow,delete_repo,user:follow,notifications,
 var nwoRe = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
 
 func runCLI(args []string) {
+	cleanOldBinary()
 	if len(args) == 0 {
 		start(nil)
 		return
@@ -57,6 +60,8 @@ func runCLI(args []string) {
 		dump(args[1:])
 	case "login":
 		login()
+	case "update", "upgrade":
+		selfUpdate(len(args) > 1 && (args[1] == "--check" || args[1] == "check"))
 	case "logout":
 		run("gh", "auth", "logout", "-h", "github.com")
 	case "doctor":
@@ -136,6 +141,9 @@ func start(first func(m *model) tea.Cmd) {
 	m.first = first
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		crashed(err)
+	}
+	if m.exitMsg != "" {
+		fmt.Println(m.exitMsg)
 	}
 }
 
@@ -248,6 +256,9 @@ func doctor() {
 	gt := strings.Fields(cfg.gitTool + " lazygit")[0]
 	_, err = exec.LookPath(gt)
 	ok(err == nil, "git tool ("+gt+", the L key) found", "optional: install it, or set  git_tool =  in the settings")
+	if rel, err := latestRelease(); err == nil {
+		ok(!newer(rel.Tag, version), "newest version ("+strings.TrimPrefix(rel.Tag, "v")+")", "run  termgit update")
+	}
 	fmt.Println("\n  settings: " + configPath())
 	fmt.Println("  cache:    " + cacheDir())
 	fmt.Println("  clones:   " + cfg.cloneInto)

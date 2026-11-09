@@ -119,17 +119,19 @@ type model struct {
 	lastIdx   int
 
 	// explore (batch 11)
-	linkZones []linkZone // ctrl+click links on the current screen
-	hx, hy    int        // where the mouse pointer is (links under it are underlined)
-	spinning  bool
-	first     func(m *model) tea.Cmd
-	spinN     int
-	homeLeft  bool // a followed link opened a page in TermGit (not the browser)
-	expUsers  map[string]*userSearch
-	profiles  map[string]*Profile
-	exp       expState
-	expRepos  map[string]*repoSearch
-	expCode   map[string]*codeSearch
+	linkZones  []linkZone // ctrl+click links on the current screen
+	hx, hy     int        // where the mouse pointer is (links under it are underlined)
+	spinning   bool
+	newVersion string // a newer release (shown at the top right)
+	exitMsg    string // printed after TermGit closes
+	first      func(m *model) tea.Cmd
+	spinN      int
+	homeLeft   bool // a followed link opened a page in TermGit (not the browser)
+	expUsers   map[string]*userSearch
+	profiles   map[string]*Profile
+	exp        expState
+	expRepos   map[string]*repoSearch
+	expCode    map[string]*codeSearch
 
 	// home + inbox (batch 10)
 	home     homeState
@@ -238,6 +240,9 @@ func (m *model) Init() tea.Cmd {
 	}
 	m.loading = true
 	cmds := []tea.Cmd{fetchRepos(), m.onSelect(), m.scanLocalInfo(), m.load("notifs:false", false, fetchNotifs(false))}
+	if !m.dump {
+		cmds = append(cmds, m.checkUpdate())
+	}
 	switch m.tab {
 	case tabHome:
 		cmds = append(cmds, m.homeLoad())
@@ -544,6 +549,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onLive()
 	case inboxDoneMsg:
 		return m, m.onInboxDone(msg)
+	case updateMsg:
+		return m, m.onUpdate(msg)
+	case updatedMsg:
+		return m, m.onUpdated(msg)
 	case configDoneMsg:
 		return m, m.onConfigDone(msg)
 	case starredMsg:
@@ -1220,6 +1229,8 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 		return m.expSetMode(z.idx)
 	case "expsearch":
 		return m.expAsk()
+	case "update":
+		return m.askUpdate()
 	case "hometile":
 		if z.idx == tabActions {
 			m.act.filter = 1
@@ -1753,6 +1764,12 @@ func (m *model) commands() []command {
 		}},
 		command{"All keys", "?", func(m *model) tea.Cmd { m.openHelp(); return nil }},
 		command{"Settings (opens the settings file in your editor)", "", func(m *model) tea.Cmd { return m.editConfig() }},
+		command{"Update TermGit", "", func(m *model) tea.Cmd {
+			if m.newVersion == "" {
+				return m.setStatus("You have the newest version ("+version+")", false)
+			}
+			return m.askUpdate()
+		}},
 		command{"Give TermGit more GitHub permissions (delete repos, follow people)", "", func(m *model) tea.Cmd {
 			return m.askScope("delete_repo,user:follow", "delete repos and follow people", nil)
 		}},
@@ -1884,8 +1901,17 @@ func (m *model) tabsBar() string {
 		x += w + 1
 	}
 	right := ""
+	if m.newVersion != "" {
+		chip := " " + icUp + " " + strings.TrimPrefix(m.newVersion, "v") + " "
+		right = lipgloss.NewStyle().Background(cChip).Foreground(cGreen).Render(chip) + " "
+	}
 	if m.login != "" {
-		right = fg(cMut).Render(icGithub+" "+m.login) + " "
+		right += fg(cMut).Render(icGithub+" "+m.login) + " "
+	}
+	if m.newVersion != "" {
+		cw := width(" " + icUp + " " + strings.TrimPrefix(m.newVersion, "v") + " ")
+		x0 := m.w - width(right)
+		m.addZone(x0, 0, x0+cw-1, 0, "update", 0)
 	}
 	gap := m.w - width(out) - width(right)
 	if gap < 1 {
