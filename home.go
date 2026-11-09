@@ -251,12 +251,12 @@ func (m *model) homeOpen() tea.Cmd {
 	it := items[m.home.cur]
 	switch it.kind {
 	case "ci":
-		return m.actLogsFor(it.run)
+		id := it.run.ID
+		return m.gotoRun(it.run.Repo, func(r *Run) bool { return r.ID == id })
 	case "review", "mypr":
-		m.prs.view = pvOverview
-		return m.prReadFor(it.pr)
+		return m.gotoPR(it.pr.repo(), it.pr.Number, true)
 	case "assigned":
-		return m.issReadFor(it.issue)
+		return m.gotoIssue(it.issue.repo(), it.issue.Number, true)
 	case "local":
 		m.setTab(tabRepos)
 		m.filter, m.filtering = "", false

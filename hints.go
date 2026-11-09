@@ -22,11 +22,11 @@ func (m *model) hintItems() []hint {
 		}
 
 	case m.tab == tabHome:
-		h = []hint{{"j/k", "move"}, {"enter", "go there"}, {"tab", "scroll the right side"}, {"o", "browser"}, {"r", "refresh"}, {"1-7", "tabs"}}
+		h = []hint{{"j/k", "move"}, {"enter", "go there (esc comes back)"}, {"tab", "scroll the right side"}, {"o", "browser"}, {"r", "refresh"}, {"1-7", "tabs"}}
 	case m.tab == tabInbox && m.inbox.filtering:
 		return []hint{{"type", "to find"}, {"↑↓", "move"}, {"enter", "keep it"}, {"esc", "clear"}}
 	case m.tab == tabInbox:
-		h = []hint{{"j/k", "move"}, {"enter", "read it here"}, {"m", "mark read"}, {"M", "mark all read"}, {"x", "unsubscribe"},
+		h = []hint{{"j/k", "move"}, {"enter", "open in TermGit"}, {"v", "read full screen"}, {"m", "mark read"}, {"M", "mark all read"}, {"x", "unsubscribe"},
 			{"a", "unread/all"}, {"/", "find"}, {"o", "browser"}, {"y", "copy link"}, {"r", "refresh"}, {"1-7", "tabs"}}
 	case m.tab == tabPRs:
 		h = m.prHints()

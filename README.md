@@ -45,8 +45,8 @@ TermGit aims to do everything lazygit does; lazygit stays one key away (`L`).
 
 ## Home and Inbox
 
-- **Home** (`1`): on the left, what needs you: failing CI, reviews asked of you, your open PRs, issues assigned to you, repos on this PC with changes to commit / push / pull, unread notifications. `enter` goes straight there. On the right: your contribution graph, numbers and recent activity.
-- **Inbox** (`6`, the tab shows the unread count): your notifications. `enter` reads an issue / PR conversation inside TermGit and marks it read, `m` mark read, `M` mark all read, `x` unsubscribe, `a` unread / all. Checked every minute.
+- **Home** (`1`): on the left, what needs you: failing CI, reviews asked of you, your open PRs, issues assigned to you, repos on this PC with changes to commit / push / pull, unread notifications. `enter` opens its normal page in TermGit (the repo, the right section, that item highlighted); `esc` comes back. On the right: your contribution graph, numbers and recent activity.
+- **Inbox** (`6`, the tab shows the unread count): your notifications. `enter` opens its page in TermGit (PR, issue, CI run, release) and marks it read, `v` reads the conversation full screen, `m` mark read, `M` mark all read, `x` unsubscribe, `a` unread / all. Checked every minute.
 
 ## Changes (local Git)
 

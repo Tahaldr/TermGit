@@ -245,8 +245,24 @@ func (m *model) onInboxDone(msg inboxDoneMsg) tea.Cmd {
 	return tea.Batch(m.setStatus(msg.ok, false), m.inboxLoad(), m.load("notifs:false", false, fetchNotifs(false)))
 }
 
-// enter: read it inside TermGit (and mark it read)
+// enter: open its page in TermGit (the repo, the right section, it highlighted) and mark it read
 func (m *model) inboxOpen() tea.Cmd {
+	n := m.selNotif()
+	if n == nil {
+		return nil
+	}
+	var cmds []tea.Cmd
+	if n.Unread {
+		id := n.ID
+		n.Unread = false
+		m.unread = max(0, m.unread-1)
+		cmds = append(cmds, m.inboxDo("Marked as read", func() error { return markRead(id) }))
+	}
+	return tea.Batch(append(cmds, m.gotoNotif(n))...)
+}
+
+// v: read the conversation full screen (and mark it read)
+func (m *model) inboxRead() tea.Cmd {
 	n := m.selNotif()
 	if n == nil {
 		return nil
@@ -276,8 +292,10 @@ func (m *model) inboxOpen() tea.Cmd {
 func (m *model) inboxKey(s string) tea.Cmd {
 	half := m.listRows() / 2
 	switch s {
-	case "enter", "v":
+	case "enter":
 		return m.inboxOpen()
+	case "v":
+		return m.inboxRead()
 	case "m":
 		if n := m.selNotif(); n != nil && n.Unread {
 			id := n.ID
@@ -497,13 +515,17 @@ func (m *model) inboxPreview(w int) (string, []string) {
 		meta = append(meta, fg(cAcc).Render("● unread"))
 	}
 	out = append(out, wrapJoin(meta, "   ", w)...)
-	open := "read it here"
-	if n.number() == 0 {
-		open = "open on GitHub"
+	h := [][2]string{{"enter", "open it in TermGit"}}
+	if n.number() > 0 {
+		h = append(h, [2]string{"v", "read full screen"})
 	}
-	out = append(out, "", hints([][2]string{{"enter", open}, {"m", "mark read"}, {"x", "unsubscribe"}, {"o", "browser"}}), sepLine(w), "")
+	out = append(out, "", hints(append(h, [2]string{"m", "mark read"}, [2]string{"x", "unsubscribe"}, [2]string{"o", "browser"})), sepLine(w), "")
 	if n.number() == 0 {
-		return "Notification", append(out, fg(cMut).Render("GitHub doesn't give more details for this kind: enter opens it in the browser."))
+		what := map[string]string{"CheckSuite": "enter opens the repo's Actions with that run picked.", "Release": "enter opens the repo's Releases.", "Commit": "enter opens the repo's Commits."}[n.Subject.Type]
+		if what == "" {
+			what = "enter opens the repo."
+		}
+		return "Notification", append(out, fg(cMut).Render(what))
 	}
 	s := m.subjects[fmt.Sprintf("%s#%d", n.Repository.FullName, n.number())]
 	switch {

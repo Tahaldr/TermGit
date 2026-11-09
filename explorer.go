@@ -42,6 +42,7 @@ type explorer struct {
 	dirCur    map[string]int // where the cursor was in each folder, for going back
 	logRef    string         // local repo: whose commits the Commits section shows ("" = the current branch)
 	plan      *rebasePlan    // an interactive rebase being planned in Commits
+	want      *want          // an item to highlight once its list loads (jumps from Home / Inbox)
 }
 
 type exItem struct {
@@ -97,9 +98,14 @@ func (m *model) openRepo() tea.Cmd {
 
 func (m *model) leaveRepo() tea.Cmd {
 	if m.ex != nil {
+		m.ex.want = nil
 		m.exSaved[m.ex.repo.NameWithOwner] = m.ex
 	}
 	m.ex, m.focus = nil, 0
+	if bt := m.backTo; bt >= 0 { // came here from Home / Inbox: go back there
+		m.backTo = -1
+		return m.setTab(bt)
+	}
 	return m.onSelect()
 }
 
@@ -504,6 +510,8 @@ func (m *model) exBack() tea.Cmd {
 		ex.filtering, ex.query[ex.sec] = false, ""
 		ex.cur[ex.sec], ex.off[ex.sec] = 0, 0
 		return m.exSelected()
+	case m.backTo >= 0:
+		return m.leaveRepo() // opened from Home / Inbox: esc goes right back there
 	case ex.sec != secCode:
 		// one crumb back: "Repos › repo › main › Commits" → "Repos › repo › main" (the repo's top)
 		if ex.dir != "" {

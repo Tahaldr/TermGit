@@ -126,6 +126,7 @@ type model struct {
 	contrib  *contribData
 	events   *eventList
 	liveN    int
+	backTo   int // the tab to return to when leaving a repo opened from Home / Inbox (-1 = none)
 
 	// local git 2 (batch 8)
 	lbranches map[string]*lbranchList
@@ -186,7 +187,7 @@ func newModel() *model {
 	m := &model{
 		tab: tabRepos, readme: map[string]readmeEntry{}, readmeErr: map[string]string{},
 		fresh: map[string]bool{}, fetching: map[string]bool{}, mdCache: map[string][]string{}, mdWidth: map[string]int{},
-		local: scanLocal(localRoots), lastIdx: -1,
+		local: scanLocal(localRoots), lastIdx: -1, backTo: -1,
 		exSaved: map[string]*explorer{}, linfo: map[string]localInfo{}, loaded: map[string]bool{},
 		inflight: map[string]bool{}, pending: map[string]tea.Cmd{}, trees: map[string]*treeData{},
 		blobs: map[string]*blobData{}, clists: map[string]*commitList{}, cdetail: map[string]*commitDetail{},
@@ -526,6 +527,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inflight[msg.key] = false
 		m.loaded[msg.key] = true
 		msg.apply(m)
+		if cmd := m.applyWant(); cmd != nil {
+			return m, tea.Batch(cmd, m.exLoad())
+		}
 		if m.tab == tabActions && m.rd == nil {
 			return m, m.loadJobs(m.selRun(), true)
 		}
@@ -585,6 +589,7 @@ func (m *model) setTab(i int) tea.Cmd {
 		return nil
 	}
 	m.tab, m.focus, m.help, m.pvOff = i, 0, false, 0
+	m.backTo = -1
 	if i == tabRepos {
 		if m.ex != nil {
 			return m.exSelected()
@@ -1303,7 +1308,7 @@ func (m *model) buttons() []button {
 	case tabInbox:
 		b := []button{}
 		if m.selNotif() != nil {
-			b = append(b, button{icRead + " Read", "enter", "inboxopen"}, button{icCheck + " Mark read", "m", "inboxread"}, button{icClose + " Unsubscribe", "x", "inboxunsub"})
+			b = append(b, button{icRepo + " Open", "enter", "inboxopen"}, button{icRead + " Read", "v", "inboxreadfull"}, button{icCheck + " Mark read", "m", "inboxread"}, button{icClose + " Unsubscribe", "x", "inboxunsub"})
 		}
 		shown := "Show all"
 		if m.inbox.all {
@@ -1358,6 +1363,8 @@ func (m *model) runButton(i int) tea.Cmd {
 		return m.homeOpen()
 	case "inboxopen":
 		return m.inboxOpen()
+	case "inboxreadfull":
+		return m.inboxRead()
 	case "inboxread":
 		return m.inboxKey("m")
 	case "inboxunsub":
@@ -2167,7 +2174,8 @@ func helpLines(w int) []string {
 		row("", "the right side: your contribution graph, numbers and recent activity"),
 		"",
 		sec("Inbox (6)"),
-		row("enter", "read it here (an issue or PR conversation); it gets marked read"),
+		row("enter", "open it in TermGit: its repo and section, it highlighted (marked read; esc comes back)"),
+		row("v", "read the conversation full screen"),
 		row("m  M", "mark read / mark all read"),
 		row("x", "unsubscribe: no more notifications for it"),
 		row("a", "unread / all"),
