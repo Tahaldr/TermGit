@@ -23,7 +23,7 @@ type tabInfo struct {
 
 var tabs = []tabInfo{
 	{"Home", icHome, 0}, {"Repos", icRepo, 0}, {"Issues", icIssue, 0}, {"PRs", icPR, 0},
-	{"Actions", icActions, 0}, {"Inbox", icInbox, 0}, {"Explore", icExplore, 8},
+	{"Actions", icActions, 0}, {"Inbox", icInbox, 0}, {"Explore", icExplore, 0},
 }
 
 const (
@@ -33,6 +33,7 @@ const (
 	tabPRs     = 3
 	tabActions = 4
 	tabInbox   = 5
+	tabExplore = 6
 )
 
 // a clickable area of the screen, recorded while drawing
@@ -117,6 +118,11 @@ type model struct {
 	lastClick time.Time
 	lastIdx   int
 
+	// explore (batch 11)
+	exp      expState
+	expRepos map[string]*repoSearch
+	expCode  map[string]*codeSearch
+
 	// home + inbox (batch 10)
 	home     homeState
 	inbox    inboxState
@@ -199,6 +205,7 @@ func newModel() *model {
 		prLists: map[string]*prList{}, prDetails: map[string]*prDetail{}, prFilesMap: map[string]*prFiles{},
 		changes: map[string]*changeList{}, diffs: map[string]*fileDiff{},
 		notifs: map[bool]*notifList{}, subjects: map[string]*subject{},
+		expRepos: map[string]*repoSearch{}, expCode: map[string]*codeSearch{},
 		lbranches: map[string]*lbranchList{}, llogs: map[string]*logList{}, stashes: map[string][]stashEntry{}, shows: map[string]*showData{},
 	}
 	m.loadRuns()
@@ -476,6 +483,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onLive()
 	case inboxDoneMsg:
 		return m, m.onInboxDone(msg)
+	case starredMsg:
+		return m, m.onStarred(msg)
+	case repoDoneMsg:
+		return m, m.onRepoDone(msg)
 	case editedMsg:
 		return m, m.onEdited(msg)
 	case issueDoneMsg:
@@ -545,6 +556,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.tab == tabInbox && m.rd == nil {
 			return m, m.loadSubject(m.selNotif(), true)
 		}
+		if m.tab == tabExplore && m.rd == nil {
+			return m, m.expLoad()
+		}
 		if m.tab == tabPRs && m.rd == nil {
 			return m, m.loadPRDetail(m.selPR(), true)
 		}
@@ -613,6 +627,9 @@ func (m *model) setTab(i int) tea.Cmd {
 	}
 	if i == tabInbox {
 		return m.inboxSelected()
+	}
+	if i == tabExplore {
+		return m.expSelected()
 	}
 	if i == tabPRs {
 		return m.prSelected()
@@ -866,7 +883,7 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		case m.tab == tabInbox && m.inbox.query != "":
 			m.inbox.query = ""
 			return m.inboxSelected()
-		case m.tab == tabInbox || m.tab == tabHome:
+		case m.tab == tabInbox || m.tab == tabHome || m.tab == tabExplore:
 			return nil
 		case m.tab == tabPRs && m.prs.query != "":
 			m.prs.query = ""
@@ -904,6 +921,9 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 	if m.tab == tabHome {
 		return m.homeKey(s)
 	}
+	if m.tab == tabExplore {
+		return m.expKey(s)
+	}
 	if m.tab == tabInbox {
 		return m.inboxKey(s)
 	}
@@ -918,6 +938,9 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.ex != nil {
 		return m.exKey(s)
+	}
+	if cmd, ok := m.repoMgmtKey(s); ok {
+		return cmd
 	}
 	switch s {
 	case "tab", "shift+tab":
@@ -1083,6 +1106,24 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 			return tea.Batch(cmd, m.inboxOpen())
 		}
 		return cmd
+	case "exprow":
+		m.focus = 0
+		double := z.idx == m.lastIdx && time.Since(m.lastClick) < 400*time.Millisecond
+		m.lastIdx, m.lastClick = z.idx, time.Now()
+		var cmd tea.Cmd
+		if z.idx != m.exp.cur {
+			m.exp.cur = z.idx
+			cmd = m.expSelected()
+		}
+		if double {
+			m.lastIdx = -1
+			return tea.Batch(cmd, m.expOpen())
+		}
+		return cmd
+	case "expmode":
+		return m.expSetMode(z.idx)
+	case "expsearch":
+		return m.expAsk()
 	case "hometile":
 		if z.idx == tabActions {
 			m.act.filter = 1
@@ -1189,6 +1230,8 @@ func (m *model) wheel(ms tea.Mouse) tea.Cmd {
 		return m.issMove(d)
 	case "homerow":
 		return m.homeMove(d)
+	case "exprow":
+		return m.expMove(d)
 	case "notifrow":
 		return m.inboxMove(d)
 	case "prrow":
@@ -1202,6 +1245,9 @@ func (m *model) wheel(ms tea.Mouse) tea.Cmd {
 		}
 		if m.tab == tabHome {
 			return m.homeMove(d)
+		}
+		if m.tab == tabExplore {
+			return m.expMove(d)
 		}
 		if m.tab == tabInbox {
 			return m.inboxMove(d)
@@ -1314,6 +1360,19 @@ func (m *model) actClone(then string) tea.Cmd {
 
 func (m *model) buttons() []button {
 	switch m.tab {
+	case tabExplore:
+		b := []button{{icSearch + " Search", "/", "expsearch"}}
+		if it, ok := m.expSel(); ok {
+			b = append(b, button{icRepo + " Open", "enter", "expopen"})
+			if it.repo != nil {
+				star := icStar + " Star"
+				if it.repo.ViewerHasStarred {
+					star = icStar + " Unstar"
+				}
+				b = append(b, button{star, "s", "expkey:s"}, button{icFork + " Fork", "F", "expkey:F"}, button{icDown + " Clone", "c", "expkey:c"})
+			}
+		}
+		return append(b, button{"Next kind", "f", "expkey:f"}, button{icGlobe + " Browser", "o", "browser"})
 	case tabHome:
 		b := []button{{icRead + " Open", "enter", "homeopen"}}
 		if it := m.homeSel(); it != nil {
@@ -1360,7 +1419,7 @@ func (m *model) buttons() []button {
 	}
 	var b []button
 	if m.exActive() == nil {
-		b = append(b, button{icRepo + " Open", "enter", "open"}, button{icRead + " Read", "v", "read"})
+		b = append(b, button{icRepo + " Open", "enter", "open"}, button{icRead + " Read", "v", "read"}, button{"New repo", "N", "newrepo"})
 	} else {
 		b = append(b, button{icRead + " Full screen", "v", "read"})
 	}
@@ -1382,6 +1441,17 @@ func (m *model) runButton(i int) tea.Cmd {
 	b := m.buttons()
 	if i >= len(b) {
 		return nil
+	}
+	if strings.HasPrefix(b[i].id, "expkey:") {
+		return m.expKey(strings.TrimPrefix(b[i].id, "expkey:"))
+	}
+	switch b[i].id {
+	case "expsearch":
+		return m.expAsk()
+	case "expopen":
+		return m.expOpen()
+	case "newrepo":
+		return m.repoNew()
 	}
 	if strings.HasPrefix(b[i].id, "homekey:") {
 		return m.homeKey(strings.TrimPrefix(b[i].id, "homekey:"))
@@ -1663,6 +1733,8 @@ func (m *model) render() string {
 	} else {
 		if m.tab == tabActions {
 			left = m.actListBox(lw, ph, 2)
+		} else if m.tab == tabExplore {
+			left = m.expListBox(lw, ph, 2)
 		} else if m.tab == tabHome {
 			left = m.homeListBox(lw, ph, 2)
 		} else if m.tab == tabInbox {
@@ -1730,6 +1802,11 @@ func (m *model) pathBar() string {
 		out = m.exPathBar()
 		if m.help {
 			out += sep + fg(cTxt).Render("Keys")
+		}
+	} else if m.tab == tabExplore {
+		out += sep + fg(cHint).Render(expModes[m.exp.mode])
+		if q := m.exp.query[m.exp.mode]; q != "" && m.exp.mode > 0 {
+			out += sep + fg(cTxt).Render("\""+q+"\"")
 		}
 	} else if m.tab == tabInbox {
 		which := "Unread"
@@ -1894,6 +1971,8 @@ func (m *model) previewBox(w, h, x0, y0 int) []string {
 		title, lines = m.issPreview(inner)
 	case m.tab == tabHome:
 		title, lines = m.homePreview(inner)
+	case m.tab == tabExplore:
+		title, lines = m.expPreview(inner)
 	case m.tab == tabInbox:
 		title, lines = m.inboxPreview(inner)
 	case m.tab == tabPRs:
@@ -2217,6 +2296,21 @@ func helpLines(w int) []string {
 		row("M", "mark all notifications read"),
 		row("alt+1-5", "open one of your recent repos"),
 		row("t", "dashboard / two-panel layout"),
+		"",
+		sec("Explore (7)"),
+		row("/", "search GitHub (its search words work: language:go stars:>500 user:x …)"),
+		row("f  [ ]", "Starred / Repos / Issues / Code"),
+		row("enter", "open the repo (or the issue / the file in its repo)"),
+		row("s  F  c", "star / fork / clone"),
+		row("v", "read the README full screen"),
+		"",
+		sec("Your repos (Repos tab)"),
+		row("N", "new repo: empty, empty + clone, or upload a folder"),
+		row("R  E", "rename / edit the description"),
+		row("V", "make private / public"),
+		row("A", "archive / unarchive"),
+		row("D", "delete (you type its name to confirm)"),
+		row("s  F", "star / fork"),
 		"",
 		sec("Inbox (6)"),
 		row("enter", "open it in TermGit: its repo and section, it highlighted (marked read; esc comes back)"),

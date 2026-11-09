@@ -763,6 +763,19 @@ func (m *model) curURL() string {
 		}
 		return ""
 	}
+	if m.tab == tabExplore {
+		if it, ok := m.expSel(); ok {
+			switch {
+			case it.repo != nil:
+				return it.repo.URL
+			case it.issue != nil:
+				return it.issue.URL
+			case it.code != nil:
+				return it.code.URL
+			}
+		}
+		return ""
+	}
 	r := m.curRepo()
 	if r == nil {
 		return ""

@@ -39,6 +39,16 @@ func (m *model) hintItems() []hint {
 			h = append(h, hint{"tab", "scroll the right side"})
 		}
 		h = append(h, hint{"o", "browser"}, hint{"r", "refresh"}, hint{"1-7", "tabs"})
+	case m.tab == tabExplore:
+		h = []hint{{"/", "search GitHub"}, {"f", "repos/issues/code/starred"}, {"j/k", "move"}, {"enter", "open"}}
+		if it, ok := m.expSel(); ok && it.repo != nil {
+			star := "star"
+			if it.repo.ViewerHasStarred {
+				star = "unstar"
+			}
+			h = append(h, hint{"s", star}, hint{"F", "fork"}, hint{"c", "clone"}, hint{"v", "README"})
+		}
+		h = append(h, hint{"o", "browser"}, hint{"y", "copy link"}, hint{"1-7", "tabs"})
 	case m.tab == tabInbox && m.inbox.filtering:
 		return []hint{{"type", "to find"}, {"↑↓", "move"}, {"enter", "keep it"}, {"esc", "clear"}}
 	case m.tab == tabInbox:
@@ -66,7 +76,8 @@ func (m *model) hintItems() []hint {
 		} else {
 			h = append(h, hint{"c", "clone"})
 		}
-		h = append(h, hint{"o", "browser"}, hint{"y", "copy link"}, hint{"r", "refresh"}, hint{"1-7", "tabs"}, hint{"q", "quit"})
+		h = append(h, hint{"N", "new repo"}, hint{"R", "rename"}, hint{"E", "describe"}, hint{"V", "visibility"}, hint{"A", "archive"}, hint{"D", "delete"},
+			hint{"s", "star"}, hint{"F", "fork"}, hint{"o", "browser"}, hint{"y", "copy link"}, hint{"r", "refresh"}, hint{"1-7", "tabs"}, hint{"q", "quit"})
 	}
 	return append(h, hint{"ctrl+p", "commands"}, hint{"?", "all keys"})
 }

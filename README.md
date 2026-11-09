@@ -17,8 +17,8 @@ Logs in through the GitHub CLI (`gh auth login`); TermGit never stores a token.
 | 8 | Local Git 2: branches, stash, graph, cherry-pick, revert, reset, tags, line staging | done |
 | 9 | Local Git 3: conflicts, interactive rebase, remotes, worktrees | done |
 | 10 | Home + Inbox: what needs you, contribution graph, activity, notifications | done |
-| 11 | Explore + repo management | next |
-| 12 | Polish: settings, help page, tests | |
+| 11 | Explore (search repos / issues / code, stars, fork) + repo management (create, rename, visibility, archive, delete) | done |
+| 12 | Polish: settings, help page, tests | next |
 
 TermGit aims to do everything lazygit does; lazygit stays one key away (`L`).
 
@@ -42,6 +42,11 @@ TermGit aims to do everything lazygit does; lazygit stays one key away (`L`).
 | `v` | read full screen (README, file, commit) |
 | `esc` | back |
 | `q` | quit |
+
+## Explore and managing your repos
+
+- **Explore** (`7`): Starred / Repos / Issues / Code (`f` or click). `/` searches all of GitHub with its search words (`language:go stars:>500`, `user:x`, `repo:owner/name` …). `enter` opens the repo in the explorer (an issue in its repo, a code hit at that file), `s` star / unstar, `F` fork, `c` clone, `v` README full screen.
+- **Repos** tab: `N` new repo (empty, empty + clone, or upload a folder from this PC), `R` rename (your copy's remote is updated), `E` description, `V` private / public, `A` archive / unarchive, `D` delete (type its name to confirm), `s` star, `F` fork.
 
 ## Home and Inbox
 

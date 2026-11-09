@@ -15,6 +15,8 @@ import (
 )
 
 type Repo struct {
+	ID               string    `json:"id"`
+	ViewerHasStarred bool      `json:"viewerHasStarred"`
 	NameWithOwner    string    `json:"nameWithOwner"`
 	Name             string    `json:"name"`
 	Description      string    `json:"description"`
@@ -81,7 +83,7 @@ const reposQuery = `query($after: String) {
                  orderBy: {field: PUSHED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        nameWithOwner name description isPrivate isFork isArchived stargazerCount forkCount pushedAt url
+        id viewerHasStarred nameWithOwner name description isPrivate isFork isArchived stargazerCount forkCount pushedAt url
         defaultBranchRef { name target { oid } }
         primaryLanguage { name color }
       }
