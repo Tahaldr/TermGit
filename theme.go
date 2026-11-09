@@ -65,6 +65,9 @@ const (
 	icCalendar  = ""
 	icUser      = ""
 	icOrg       = ""
+	icEdit      = ""
+	icInfo      = ""
+	icCommand   = ""
 	icRead      = ""
 )
 

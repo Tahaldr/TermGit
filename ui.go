@@ -120,7 +120,10 @@ type model struct {
 
 	// explore (batch 11)
 	linkZones []linkZone // ctrl+click links on the current screen
-	homeLeft  bool       // a followed link opened a page in TermGit (not the browser)
+	hx, hy    int        // where the mouse pointer is (links under it are underlined)
+	spinning  bool
+	spinN     int
+	homeLeft  bool // a followed link opened a page in TermGit (not the browser)
 	expUsers  map[string]*userSearch
 	profiles  map[string]*Profile
 	exp       expState
@@ -200,7 +203,7 @@ func newModel() *model {
 	m := &model{
 		tab: tabHome, readme: map[string]readmeEntry{}, readmeErr: map[string]string{},
 		fresh: map[string]bool{}, fetching: map[string]bool{}, mdCache: map[string][]string{}, mdWidth: map[string]int{},
-		local: scanLocal(localRoots), lastIdx: -1, backTo: -1,
+		local: scanLocal(localRoots), lastIdx: -1, backTo: -1, hx: -1, hy: -1,
 		exSaved: map[string]*explorer{}, linfo: map[string]localInfo{}, loaded: map[string]bool{},
 		inflight: map[string]bool{}, pending: map[string]tea.Cmd{}, trees: map[string]*treeData{},
 		blobs: map[string]*blobData{}, clists: map[string]*commitList{}, cdetail: map[string]*commitDetail{},
@@ -357,7 +360,7 @@ func fuzzy(s, q string) bool {
 }
 
 func (m *model) palRows() int {
-	if !m.palette {
+	if true { // the palette is a popup now
 		return 0
 	}
 	n := len(m.palMatches())
@@ -413,7 +416,44 @@ func (m *model) ensureVisible() {
 // ---------------------------------------------------------------------------
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	mm, cmd := m.update(msg)
+	// a spinner turns while anything is loading
+	if !m.spinning && !m.dump && m.busy() {
+		m.spinning = true
+		cmd = tea.Batch(cmd, spin())
+	}
+	return mm, cmd
+}
+
+type spinTick struct{}
+
+func spin() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return spinTick{} })
+}
+
+func (m *model) busy() bool {
+	if m.loading {
+		return true
+	}
+	for _, v := range m.inflight {
+		if v {
+			return true
+		}
+	}
+	return false
+}
+
+var spinFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case spinTick:
+		if m.busy() {
+			m.spinN++
+			return m, spin()
+		}
+		m.spinning = false
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		m.ensureVisible()
@@ -595,6 +635,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.click(msg.Mouse())
 	case tea.MouseWheelMsg:
 		return m, m.wheel(msg.Mouse())
+	case tea.MouseMotionMsg:
+		ms := msg.Mouse()
+		m.hx, m.hy = ms.X, ms.Y
 	}
 	return m, nil
 }
@@ -1053,6 +1096,24 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 		return nil
 	}
 	z := m.zoneAt(ms.X, ms.Y)
+	// popups first: a dialog takes y / n clicks, the palette its rows; a click outside closes the palette
+	if p := m.prompt; p != nil {
+		switch {
+		case p.confirm && z != nil && z.id == "dlg-yes":
+			m.prompt = nil
+			return p.done(m, "y")
+		case p.confirm && z != nil && z.id == "dlg-no":
+			m.prompt = nil
+			if p.no != nil {
+				return p.no(m)
+			}
+		}
+		return nil
+	}
+	if m.palette && (z == nil || (z.id != "pal" && z.id != "palbox")) {
+		m.closePal()
+		return nil
+	}
 	if z == nil {
 		return nil
 	}
@@ -1735,10 +1796,13 @@ func (m *model) View() tea.View {
 	default:
 		content = m.render()
 	}
-	content, m.linkZones = takeLinks(content)
+	if m.w >= 70 && m.h >= 16 {
+		content = m.overlays(content)
+	}
+	content, m.linkZones = takeLinks(content, m.hx, m.hy)
 	v := tea.NewView(content)
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	v.MouseMode = tea.MouseModeAllMotion // motion too: links get underlined under the pointer
 	v.WindowTitle = "TermGit"
 	return v
 }
@@ -1755,9 +1819,6 @@ func (m *model) render() string {
 		lines = append(lines, m.homeGridRender(ph)...)
 		for len(lines) < 2+ph {
 			lines = append(lines, "")
-		}
-		if m.palette {
-			lines = append(lines, m.paletteBox(2+ph)...)
 		}
 		nh := m.hintRows()
 		lines = append(lines, m.buttonsBar(m.h-1-nh))
@@ -1788,9 +1849,6 @@ func (m *model) render() string {
 	for i := 0; i < ph; i++ {
 		lines = append(lines, left[i]+right[i])
 	}
-	if m.palette {
-		lines = append(lines, m.paletteBox(2+ph)...)
-	}
 	nh := m.hintRows()
 	lines = append(lines, m.buttonsBar(m.h-1-nh))
 	lines = append(lines, m.hintLines(m.h-nh)...)
@@ -1801,9 +1859,9 @@ func (m *model) tabsBar() string {
 	out := " "
 	x := 1
 	for i, t := range tabs {
-		label := " " + t.icon + " " + t.name + " "
+		label := " " + fmt.Sprint(i+1) + " " + t.icon + " " + t.name + " "
 		if i == tabInbox && m.unread > 0 {
-			label = " " + t.icon + " " + t.name + " " + fmt.Sprint(m.unread) + " "
+			label = " " + fmt.Sprint(i+1) + " " + t.icon + " " + t.name + " " + fmt.Sprint(m.unread) + " "
 		}
 		var s string
 		switch {
@@ -1879,12 +1937,8 @@ func (m *model) pathBar() string {
 	}
 	var right string
 	switch {
-	case m.status != "" && m.statusErr:
-		right = fg(cRed).Render(icWarn + " " + m.status)
-	case m.status != "":
-		right = fg(cGreen).Render(icCheck + " " + m.status)
-	case m.loading:
-		right = fg(cMut).Render(icRefresh + " updating…")
+	case m.busy():
+		right = fg(cAcc).Render(spinFrames[m.spinN%len(spinFrames)]) + fg(cMut).Render(" loading…")
 	case !m.reposAt.IsZero():
 		if a := ago(m.reposAt); a == "now" {
 			right = fg(cMut).Render("updated just now")
@@ -2210,13 +2264,16 @@ func hints(list [][2]string) string {
 func (m *model) hintBar(y int) string {
 	if p := m.prompt; p != nil {
 		if p.confirm {
-			return " " + fg(cYellow).Render(p.label) + "  " + fg(cAcc).Render("y") + fg(cMut).Render(" yes  ") + fg(cAcc).Render("n") + fg(cMut).Render(" no")
+			no := "no"
+			if p.no != nil {
+				no = "no, the other way"
+			}
+			return " " + hints([][2]string{{"y", "yes"}, {"n", no}, {"esc", "cancel"}})
 		}
-		return " " + fg(cYellow).Render(p.label) + " " + fg(cTxt).Render(p.text) + fg(cAcc).Render("▏")
+		return " " + hints([][2]string{{"enter", "ok"}, {"esc", "cancel"}, {"ctrl+u", "clear"}, {"backspace", "delete"}})
 	}
 	if m.palette {
-		return " " + fg(cAcc).Render(":") + " " + fg(cTxt).Render(m.palQ) + fg(cAcc).Render("▏") + "   " +
-			hints([][2]string{{"↑↓", "choose"}, {"enter", "run"}, {"esc", "close"}})
+		return " " + hints([][2]string{{"type", "to filter"}, {"↑↓", "choose"}, {"enter", "run"}, {"esc", "close"}})
 	}
 	return ""
 }

@@ -270,12 +270,18 @@ func (m *model) hintRows() int {
 	if m.prompt != nil || m.palette {
 		return 1
 	}
+	if _, _, _, ok := m.typing(); ok {
+		return 1
+	}
 	return max(1, len(wrapHints(m.hintItems(), m.w)))
 }
 
 func (m *model) hintLines(y0 int) []string {
 	if m.prompt != nil || m.palette {
 		return []string{m.hintBar(y0)}
+	}
+	if _, _, _, ok := m.typing(); ok {
+		return []string{" " + hints([][2]string{{"type", "to find (the list follows)"}, {"↑↓", "move in the list"}, {"enter", "keep it"}, {"esc", "clear"}})}
 	}
 	var out []string
 	for li, line := range wrapHints(m.hintItems(), m.w) {

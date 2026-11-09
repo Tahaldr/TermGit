@@ -36,7 +36,7 @@ var rawURL = regexp.MustCompile(`https?://[^\s<>"'` + "`" + `)\]│]+`)
 
 // takeLinks finds the links on the screen, remembers where they are, and removes the
 // OSC 8 marks (so the terminal doesn't also act on them)
-func takeLinks(content string) (string, []linkZone) {
+func takeLinks(content string, hx, hy int) (string, []linkZone) {
 	var zones []linkZone
 	lines := strings.Split(content, "\n")
 	for y, line := range lines {
@@ -89,14 +89,21 @@ func takeLinks(content string) (string, []linkZone) {
 			zones = append(zones, linkZone{start, col - 1, y, open})
 		}
 		clean := b.String()
-		lines[y] = clean
-		// plain addresses in the text
-		plain := ansi.Strip(clean)
-		for _, loc := range rawURL.FindAllStringIndex(plain, -1) {
-			x0 := ansi.StringWidth(plain[:loc[0]])
-			x1 := x0 + ansi.StringWidth(plain[loc[0]:loc[1]]) - 1
-			zones = append(zones, linkZone{x0, x1, y, strings.TrimRight(plain[loc[0]:loc[1]], ".,;:")})
+		// plain addresses (found below) and marked links: underline the one under the pointer
+		plainHere := ansi.Strip(clean)
+		for _, loc := range rawURL.FindAllStringIndex(plainHere, -1) {
+			x0 := ansi.StringWidth(plainHere[:loc[0]])
+			zones = append(zones, linkZone{x0, x0 + ansi.StringWidth(plainHere[loc[0]:loc[1]]) - 1, y, strings.TrimRight(plainHere[loc[0]:loc[1]], ".,;:")})
 		}
+		if y == hy {
+			for _, z := range zones {
+				if z.y == y && hx >= z.x0 && hx <= z.x1 {
+					clean = underlineCols(clean, z.x0, z.x1)
+					break
+				}
+			}
+		}
+		lines[y] = clean
 	}
 	return strings.Join(lines, "\n"), zones
 }
@@ -179,4 +186,44 @@ func (m *model) gotoFile(nwo, p string) tea.Cmd {
 		return tea.Batch(cmd, m.exSelected())
 	}
 	return cmd
+}
+
+// underlineCols underlines screen columns x0..x1 of a line (keeping its colors)
+func underlineCols(line string, x0, x1 int) string {
+	var b strings.Builder
+	col, on := 0, false
+	for i := 0; i < len(line); {
+		if line[i] == 0x1b {
+			j := i + 1
+			if j < len(line) && line[j] == '[' {
+				j++
+				for j < len(line) && (line[j] < 0x40 || line[j] > 0x7e) {
+					j++
+				}
+				j++
+			}
+			b.WriteString(line[i:min(j, len(line))])
+			if on { // a style reset in the middle: underline again
+				b.WriteString("\x1b[4m")
+			}
+			i = j
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(line[i:])
+		if col == x0 && !on {
+			b.WriteString("\x1b[4m")
+			on = true
+		}
+		b.WriteString(line[i : i+size])
+		col += ansi.StringWidth(string(r))
+		i += size
+		if on && col > x1 {
+			b.WriteString("\x1b[24m")
+			on = false
+		}
+	}
+	if on {
+		b.WriteString("\x1b[24m")
+	}
+	return b.String()
 }

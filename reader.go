@@ -418,13 +418,6 @@ func (m *model) rdRender() string {
 		left = trunc(left, m.w-width(right)-1)
 		gap = m.w - width(left) - width(right)
 	}
-	if m.status != "" {
-		c, ic := cGreen, icCheck
-		if m.statusErr {
-			c, ic = cRed, icWarn
-		}
-		right = fg(c).Render(ic+" "+m.status) + "  " + right
-	}
 	gap = m.w - width(left) - width(right)
 	if gap < 1 {
 		left = trunc(left, max(m.w-width(right)-1, 0))

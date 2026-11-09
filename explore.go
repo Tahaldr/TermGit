@@ -605,16 +605,13 @@ func (m *model) expListBox(w, h, y0 int) []string {
 	inner := w - 4
 	var body []string
 	q := m.exp.query[m.exp.mode]
-	if m.exp.mode > 0 {
-		line := fg(cAcc).Render(icSearch+" ") + fg(cTxt).Render(q)
-		if q == "" {
-			line += fg(cMut).Render("press / to search GitHub")
-		}
-		if m.exp.mode == modeUsers && m.exp.user != "" {
-			line = fg(cMut).Render("← ") + fg(cAcc).Render(m.exp.user) + fg(cMut).Render("  (esc: back to the results)")
-		}
-		body = append(body, line)
-		m.addZone(1, y0+1, w-2, y0+1, "expsearch", 0)
+	if m.exp.mode > 0 && q != "" {
+		qs := "  " + icSearch + " " + q
+		title += fg(cTxt).Render(qs)
+		m.addZone(x, y0, x+width(qs)-1, y0, "expsearch", 0)
+	}
+	if m.exp.mode == modeUsers && m.exp.user != "" {
+		body = append(body, fg(cMut).Render("← ")+fg(cAcc).Render(m.exp.user)+fg(cMut).Render("  (esc: back to the results)"))
 	}
 	items := m.expItems()
 	errText, loading := "", false
@@ -666,7 +663,7 @@ func (m *model) expListBox(w, h, y0 int) []string {
 	case len(items) == 0 && q != "":
 		body = append(body, "", fg(cMut).Render("Nothing found."))
 	case len(items) == 0:
-		body = append(body, "", fg(cMut).Render("Examples: termgit, language:go stars:>500,"), fg(cMut).Render("bubbletea user:charmbracelet"))
+		body = append(body, "", fg(cTxt).Render("Press / to search GitHub."), "", fg(cMut).Render("Examples: termgit, language:go stars:>500,"), fg(cMut).Render("bubbletea user:charmbracelet"))
 	}
 	rows := h - 2 - len(body)
 	rowY := y0 + 1 + len(body)
