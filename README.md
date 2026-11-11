@@ -53,7 +53,7 @@ Then get TermGit:
 - **Download** the program for your system from the [Releases](../../releases) page
   (`termgit_windows_amd64.exe`, `termgit_darwin_arm64`, `termgit_linux_amd64`, …), rename it to
   `termgit` (`termgit.exe` on Windows) and put it in a folder on your `PATH`.
-- **Or with Go** (1.27+): `go install github.com/Tahaldr/termgit/v2@latest`
+- **Or with Go** (1.27+): `go install github.com/Tahaldr/TermGit/v2@latest`
 
 ## First start
 
@@ -135,7 +135,7 @@ termgit update --check    # only tells you if there's a newer one
 ```
 
 TermGit also checks once a day and shows a green arrow with the new version at the top right — click
-it to update. If you installed with Go, `go install github.com/Tahaldr/termgit/v2@latest` works too.
+it to update. If you installed with Go, `go install github.com/Tahaldr/TermGit/v2@latest` works too.
 
 **Your settings and data are never touched by an update**: they live in their own folders (see
 [Settings](#settings)), apart from the program.
@@ -202,8 +202,8 @@ if you like to have it.
 ## Building from source
 
 ```
-git clone https://github.com/Tahaldr/termgit
-cd termgit
+git clone https://github.com/Tahaldr/TermGit
+cd TermGit
 go build -o termgit .          # termgit.exe on Windows
 go test ./...
 ```

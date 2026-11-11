@@ -68,23 +68,18 @@ func (m *model) repoNewDesc(name, vis string) tea.Cmd {
 		dest := filepath.Join(cloneRoot, name)
 		m.openPicker("Create "+name, []command{
 			{"Empty repo on GitHub", "", func(m *model) tea.Cmd { return m.ghRepo("Created "+name, base...) }},
-			{"Empty repo, and clone it into " + tildePath(dest), "", func(m *model) tea.Cmd {
-				if m.dump {
-					return m.setStatus("Would create and clone "+name, false)
-				}
-				return tea.Batch(m.setStatus("Creating…", false), func() tea.Msg {
-					args := append(append([]string{}, base...), "--add-readme")
-					out, err := exec.Command("gh", args...).CombinedOutput()
-					if err == nil {
-						var o2 []byte
-						o2, err = exec.Command("gh", "repo", "clone", name, dest).CombinedOutput()
-						out = append(out, o2...)
+			{"Empty repo, and clone it to a folder you choose", "", func(m *model) tea.Cmd {
+				m.prompt = &prompt{label: "Clone " + name + " into:", text: dest, done: func(m *model, dest string) tea.Cmd {
+					if dest == "" {
+						return nil
 					}
-					if err != nil {
-						err = fmt.Errorf("%s", strings.TrimSpace(string(out)))
+					dest = expandHome(dest)
+					if entries, err := os.ReadDir(dest); err == nil && len(entries) > 0 {
+						return m.setStatus(tildePath(dest)+" already has files in it: pick an empty or new folder", true)
 					}
-					return repoDoneMsg{"Created " + name + " and cloned it into " + tildePath(dest), err}
-				})
+					return m.createAndClone(base, name, dest)
+				}}
+				return nil
 			}},
 			{"Upload a folder from this PC (it becomes the repo)", "", func(m *model) tea.Cmd {
 				m.prompt = &prompt{label: "Folder:", text: dest, done: func(m *model, dir string) tea.Cmd {
@@ -196,4 +191,24 @@ type scopeNeededMsg struct {
 
 func (m *model) onScopeNeeded(msg scopeNeededMsg) tea.Cmd {
 	return m.askScope(msg.scope, msg.why, func(m *model) tea.Cmd { return m.ghRepo(msg.ok, msg.args...) })
+}
+
+// createAndClone makes the GitHub repo (with a README so it can be cloned) and clones it into dest
+func (m *model) createAndClone(base []string, name, dest string) tea.Cmd {
+	if m.dump {
+		return m.setStatus("Would create "+name+" and clone it into "+dest, false)
+	}
+	return tea.Batch(m.setStatus("Creating…", false), func() tea.Msg {
+		args := append(append([]string{}, base...), "--add-readme")
+		out, err := exec.Command("gh", args...).CombinedOutput()
+		if err == nil {
+			var o2 []byte
+			o2, err = exec.Command("gh", "repo", "clone", name, dest).CombinedOutput()
+			out = append(out, o2...)
+		}
+		if err != nil {
+			err = fmt.Errorf("%s", strings.TrimSpace(string(out)))
+		}
+		return repoDoneMsg{"Created " + name + " and cloned it into " + tildePath(dest), err}
+	})
 }

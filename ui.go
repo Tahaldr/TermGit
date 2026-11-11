@@ -50,6 +50,7 @@ type prompt struct {
 	text    string
 	done    func(m *model, value string) tea.Cmd
 	no      func(m *model) tea.Cmd // y / n question: what "n" does (nothing if nil)
+	back    *prompt                // the step before this one (esc goes back to it)
 }
 
 type command struct {
@@ -180,6 +181,7 @@ type model struct {
 	releases map[string]*releaseList
 	logs     map[string]map[int64]string
 	palItems []command // the palette used as a picker (workflows, files to download)
+	palBack  *prompt   // the step before the picker (esc goes back to it)
 	palTitle string
 
 	// reader (batch 3): full screen; solo = started as `termgit file.md`
@@ -725,7 +727,18 @@ func (m *model) openPicker(title string, items []command) {
 }
 
 func (m *model) closePal() {
-	m.palette, m.palItems, m.palTitle = false, nil, ""
+	m.palette, m.palItems, m.palTitle, m.palBack = false, nil, "", nil
+}
+
+// nextStep: after answering p, the next question (or picker) remembers p, so esc can go back to it
+func (m *model) nextStep(p *prompt, cmd tea.Cmd) tea.Cmd {
+	if m.prompt != nil && m.prompt != p && m.prompt.back == nil {
+		m.prompt.back = p
+	}
+	if m.palette && m.palItems != nil && m.palBack == nil {
+		m.palBack = p
+	}
+	return cmd
 }
 
 // text typed into the filter / prompt / palette; returns false when the key isn't text editing
@@ -755,25 +768,32 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 
 	// bottom-bar question / text
 	if p := m.prompt; p != nil {
+		// esc: one step back (to the question before, with what you typed); ctrl+x: cancel all of it
+		if s == "ctrl+x" {
+			m.prompt, m.palBack = nil, nil
+			return m.setStatus("Cancelled", false)
+		}
+		if s == "esc" {
+			m.prompt = p.back
+			return nil
+		}
 		if p.confirm {
 			switch strings.ToLower(s) {
 			case "y", "enter":
 				m.prompt = nil
-				return p.done(m, "y")
-			case "n", "esc", "q":
+				return m.nextStep(p, p.done(m, "y"))
+			case "n", "q":
 				m.prompt = nil
 				if p.no != nil && strings.ToLower(s) == "n" {
-					return p.no(m)
+					return m.nextStep(p, p.no(m))
 				}
 			}
 			return nil
 		}
 		switch s {
-		case "esc":
-			m.prompt = nil
 		case "enter":
 			m.prompt = nil
-			return p.done(m, strings.TrimSpace(p.text))
+			return m.nextStep(p, p.done(m, strings.TrimSpace(p.text)))
 		default:
 			editText(&p.text, k)
 		}
@@ -790,11 +810,23 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 		list := m.palMatches()
 		switch s {
 		case "esc", "ctrl+p":
+			back := m.palBack
 			m.closePal()
+			m.prompt = back // a picker in the middle of steps: back to the step before
+		case "ctrl+x":
+			m.closePal()
+			if m.palItems == nil && m.palTitle == "" {
+				return m.setStatus("Cancelled", false)
+			}
 		case "enter":
+			back := m.palBack
 			m.closePal()
 			if m.palCur < len(list) {
-				return list[m.palCur].run(m)
+				cmd := list[m.palCur].run(m)
+				if m.prompt != nil && m.prompt.back == nil {
+					m.prompt.back = back
+				}
+				return cmd
 			}
 		case "down", "ctrl+n", "ctrl+j", "tab":
 			if m.palCur < len(list)-1 {
@@ -1116,11 +1148,11 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 		switch {
 		case p.confirm && z != nil && z.id == "dlg-yes":
 			m.prompt = nil
-			return p.done(m, "y")
+			return m.nextStep(p, p.done(m, "y"))
 		case p.confirm && z != nil && z.id == "dlg-no":
 			m.prompt = nil
 			if p.no != nil {
-				return p.no(m)
+				return m.nextStep(p, p.no(m))
 			}
 		}
 		return nil
@@ -2300,11 +2332,14 @@ func (m *model) hintBar(y int) string {
 			if p.no != nil {
 				no = "no, the other way"
 			}
-			return " " + hints([][2]string{{"y", "yes"}, {"n", no}, {"esc", "cancel"}})
+			return " " + hints(append([][2]string{{"y", "yes"}, {"n", no}}, m.backHints(p.back != nil)...))
 		}
-		return " " + hints([][2]string{{"enter", "ok"}, {"esc", "cancel"}, {"ctrl+u", "clear"}, {"backspace", "delete"}})
+		return " " + hints(append([][2]string{{"enter", "ok"}, {"ctrl+u", "clear"}}, m.backHints(p.back != nil)...))
 	}
 	if m.palette {
+		if m.palBack != nil {
+			return " " + hints([][2]string{{"type", "to filter"}, {"↑↓", "choose"}, {"enter", "pick"}, {"esc", "back"}, {"ctrl+x", "cancel"}})
+		}
 		return " " + hints([][2]string{{"type", "to filter"}, {"↑↓", "choose"}, {"enter", "run"}, {"esc", "close"}})
 	}
 	return ""
@@ -2328,4 +2363,12 @@ func ago(t time.Time) string {
 		return fmt.Sprintf("%dmo", int(d.Hours()/24/30))
 	}
 	return fmt.Sprintf("%dy", int(d.Hours()/24/365))
+}
+
+// the keys for leaving a question: back to the step before (if there is one) or cancel
+func (m *model) backHints(hasBack bool) [][2]string {
+	if hasBack {
+		return [][2]string{{"esc", "back"}, {"ctrl+x", "cancel"}}
+	}
+	return [][2]string{{"esc", "cancel"}}
 }

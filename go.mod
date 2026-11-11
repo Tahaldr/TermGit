@@ -1,4 +1,4 @@
-module github.com/Tahaldr/termgit/v2
+module github.com/Tahaldr/TermGit/v2
 
 go 1.27.3
 

@@ -99,6 +99,14 @@ func (m *model) cmdlinePopup(lines []string) {
 	}
 	input := fg(cAcc).Bold(true).Render("❯ ") + fg(cTxt).Render(text) + lipgloss.NewStyle().Background(cAcc).Render(" ")
 	body = append(body, trunc(input, inner))
+	// how to leave it, right under the input
+	keys := [][2]string{{"enter", "ok"}}
+	if m.prompt != nil {
+		keys = append(keys, m.backHints(m.prompt.back != nil)...)
+	} else {
+		keys = append(keys, [2]string{"esc", "clear"})
+	}
+	body = append(body, fg(cDim).Render(strings.Repeat("─", inner)), hints(keys))
 	box := popupBox(fg(cAcc).Bold(true).Render(title), w, body, fg(cAcc), true)
 	x := (m.w - w) / 2
 	put(lines, x, 2, box, w)
@@ -139,6 +147,9 @@ func (m *model) dialogPopup(lines []string) {
 	}
 	no := lipgloss.NewStyle().Background(cChip).Foreground(cTxt).Render(noLabel)
 	esc := fg(cMut).Render("   esc cancel")
+	if p.back != nil {
+		esc = fg(cMut).Render("   esc back · ctrl+x cancel")
+	}
 	buttons := yes + "  " + no + esc
 	gap := max(0, (inner-width(buttons))/2)
 	body = append(body, strings.Repeat(" ", gap)+buttons, "")
