@@ -76,7 +76,9 @@ push or pull, and unread notifications. Quick keys act right there (`R` re-run, 
 
 **Repos** — all your repos (yours, shared, organizations), with badges for the ones cloned on your
 computer: changes not committed `●`, commits to push `↑`, commits to pull `↓`. Create, rename,
-describe, change visibility, archive or delete a repo; star, fork, clone.
+describe, change visibility, archive or delete a repo; star, fork, clone. A new empty repo opens on
+its **Quick setup** (like GitHub's): the HTTPS / SSH addresses to copy, the commands to start a project or
+push one you have — or press `U` and TermGit pushes a folder from your computer into it for you.
 
 **Inside a repo** — sections you switch with `[` `]`:
 

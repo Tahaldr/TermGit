@@ -551,6 +551,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onLive()
 	case inboxDoneMsg:
 		return m, m.onInboxDone(msg)
+	case pushedMsg:
+		return m, m.onPushed(msg)
+	case createdRepoMsg:
+		return m, m.onCreatedRepo(msg)
 	case updateMsg:
 		return m, m.onUpdate(msg)
 	case updatedMsg:
@@ -1540,6 +1544,10 @@ func (m *model) buttons() []button {
 		return append(b, button{icCheck + " Mark all read", "M", "inboxallread"}, button{shown, "a", "inboxtoggle"},
 			button{icGlobe + " Browser", "o", "browser"}, button{icRefresh + " Refresh", "r", "refresh"})
 	}
+	if m.exActive() != nil && m.ex.sec == secCode && m.isEmptyRepo() {
+		return []button{{icLink + " Copy HTTPS", "y", "qs-https"}, {icLink + " Copy SSH", "Y", "qs-ssh"}, {icUp + " Push a folder", "U", "qs-push"},
+			{icDown + " Clone", "c", "clone"}, {icGlobe + " Browser", "o", "browser"}, {icRefresh + " Refresh", "r", "refresh"}}
+	}
 	if b := m.chButtons(); b != nil {
 		return b
 	}
@@ -1585,6 +1593,12 @@ func (m *model) runButton(i int) tea.Cmd {
 		return m.expKey(strings.TrimPrefix(b[i].id, "expkey:"))
 	}
 	switch b[i].id {
+	case "qs-https":
+		return m.copyText(httpsURL(m.ex.repo.NameWithOwner), "Copied "+httpsURL(m.ex.repo.NameWithOwner))
+	case "qs-ssh":
+		return m.copyText(sshURL(m.ex.repo.NameWithOwner), "Copied "+sshURL(m.ex.repo.NameWithOwner))
+	case "qs-push":
+		return m.pushFolder()
 	case "expsearch":
 		return m.expAsk()
 	case "expopen":
@@ -2223,6 +2237,8 @@ func (m *model) repoPreview(r *Repo, w int) []string {
 
 	e, ok := m.readme[r.NameWithOwner]
 	switch {
+	case ok && (e.none || strings.TrimSpace(e.md) == "") && r.DefaultBranchRef == nil:
+		out = append(out, m.cachedLines(fmt.Sprintf("qsl:%s:%d", r.NameWithOwner, w), func() []string { return renderMarkdown(quickSetupMD(r.NameWithOwner), w) })...)
 	case ok && (e.none || strings.TrimSpace(e.md) == ""):
 		out = append(out, fg(cMut).Render("This repo has no README."))
 	case ok:

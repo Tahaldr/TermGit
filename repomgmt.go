@@ -67,7 +67,27 @@ func (m *model) repoNewDesc(name, vis string) tea.Cmd {
 		}
 		dest := filepath.Join(cloneRoot, name)
 		m.openPicker("Create "+name, []command{
-			{"Empty repo on GitHub", "", func(m *model) tea.Cmd { return m.ghRepo("Created "+name, base...) }},
+			{"Empty repo on GitHub (then its Quick setup: addresses and the commands to start)", "", func(m *model) tea.Cmd {
+				if m.dump {
+					return m.setStatus("Would create "+name, false)
+				}
+				private := vis == "--private"
+				return tea.Batch(m.setStatus("Creating…", false), func() tea.Msg {
+					out, err := exec.Command("gh", base...).CombinedOutput()
+					text := strings.TrimSpace(string(out))
+					if err != nil {
+						return createdRepoMsg{"", private, fmt.Errorf("%s", text)}
+					}
+					// gh prints the new repo's address: https://github.com/owner/name
+					nwo := name
+					if i := strings.Index(text, "github.com/"); i >= 0 {
+						nwo = strings.Fields(text[i+len("github.com/"):])[0]
+					} else if m.login != "" {
+						nwo = m.login + "/" + name
+					}
+					return createdRepoMsg{strings.TrimSuffix(nwo, ".git"), private, nil}
+				})
+			}},
 			{"Empty repo, and clone it to a folder you choose", "", func(m *model) tea.Cmd {
 				m.prompt = &prompt{label: "Clone " + name + " into:", text: dest, done: func(m *model, dest string) tea.Cmd {
 					if dest == "" {

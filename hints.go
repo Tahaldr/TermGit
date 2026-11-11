@@ -98,6 +98,9 @@ func (m *model) exHints(ex *explorer) []hint {
 	local := m.isLocal()
 	switch ex.sec {
 	case secCode:
+		if m.isEmptyRepo() {
+			return []hint{{"y", "copy HTTPS"}, {"Y", "copy SSH"}, {"U", "push a folder here"}, {"c", "clone"}, {"o", "browser"}, {"r", "refresh"}}
+		}
 		if m.focus == 1 {
 			return []hint{{"j/k", "scroll"}, {"ctrl+d/u", "page"}, {"v", "full screen"}, {"e", edName()}, {"o", "browser"}}
 		}

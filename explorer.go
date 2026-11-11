@@ -546,6 +546,17 @@ func (m *model) exRefresh() tea.Cmd {
 
 func (m *model) exKey(s string) tea.Cmd {
 	ex := m.ex
+	if ex.sec == secCode && m.isEmptyRepo() {
+		nwo := ex.repo.NameWithOwner
+		switch s {
+		case "y":
+			return m.copyText(httpsURL(nwo), "Copied "+httpsURL(nwo))
+		case "Y":
+			return m.copyText(sshURL(nwo), "Copied "+sshURL(nwo))
+		case "U":
+			return m.pushFolder()
+		}
+	}
 	if ex.sec == secActions || ex.sec == secReleases {
 		if cmd, ok := m.ciKey(s); ok {
 			return cmd
@@ -1137,6 +1148,9 @@ func wrapText(s string, w int, c lipgloss.Style) []string {
 // exPreview is the right panel inside a repo: a file, a folder, a commit or a branch
 func (m *model) exPreview(w int) (string, []string) {
 	ex := m.ex
+	if ex.sec == secCode && m.isEmptyRepo() {
+		return "Quick setup", m.quickSetupLines(ex.repo.NameWithOwner, w)
+	}
 	it, ok := m.exSel()
 	if !ok {
 		switch ex.sec {
