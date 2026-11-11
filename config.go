@@ -22,6 +22,7 @@ type config struct {
 	editor     string   // writes comments / commit messages, opens files
 	gitTool    string   // the L key
 	notify     int      // seconds between notification checks
+	hints      string   // full, short (only the keys that are hard to guess)
 }
 
 var cfg = defaultConfig()
@@ -35,6 +36,7 @@ func defaultConfig() config {
 		editor:     "nvim",
 		gitTool:    "lazygit",
 		notify:     60,
+		hints:      "full",
 	}
 }
 
@@ -69,11 +71,15 @@ git_tool = %s
 
 # How often the Inbox checks for new notifications, in seconds
 notify_every = %d
+
+# Key hints at the bottom: full, or short (just ctrl+p and ?, plus the keys of special modes like conflicts)
+# H switches any time and remembers it
+hints = %s
 `
 
 func writeDefaultConfig(p string, c config) error {
 	os.MkdirAll(filepath.Dir(p), 0o755)
-	text := fmt.Sprintf(configHelp, c.startTab, c.homeLayout, c.cloneInto, strings.Join(c.lookIn, " ; "), c.editor, c.gitTool, c.notify)
+	text := fmt.Sprintf(configHelp, c.startTab, c.homeLayout, c.cloneInto, strings.Join(c.lookIn, " ; "), c.editor, c.gitTool, c.notify, c.hints)
 	return os.WriteFile(p, []byte(text), 0o644)
 }
 
@@ -127,6 +133,10 @@ func loadConfig() config {
 		case "git_tool":
 			if v != "" {
 				c.gitTool = v
+			}
+		case "hints":
+			if v = strings.ToLower(v); v == "full" || v == "short" {
+				c.hints = v
 			}
 		case "notify_every":
 			if n := atoiDef(v, c.notify); n >= 15 {
@@ -215,6 +225,8 @@ func (m *model) onConfigDone(msg configDoneMsg) tea.Cmd {
 	cfg = loadConfig()
 	cloneRoot, localRoots = cfg.cloneInto, cfg.lookIn
 	m.homeGrid = cfg.homeLayout != "panels"
+	m.shortHints = cfg.hints == "short"
+	m.saveSettings()
 	m.local = scanLocal(localRoots)
 	return tea.Batch(m.setStatus("Settings saved and applied", false), m.scanLocalInfo())
 }

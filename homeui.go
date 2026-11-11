@@ -705,20 +705,29 @@ func (m *model) homePreview(w int) (string, []string) {
 // ---- settings saved between runs ----
 
 type settings struct {
-	HomeList bool `json:"homeList"` // true = the two-panel Home
+	HomeList bool   `json:"homeList"`        // true = the two-panel Home
+	Hints    string `json:"hints,omitempty"` // "full" / "short" once H was pressed (wins over the settings file)
 }
 
 func (m *model) saveSettings() {
 	if !m.dump {
-		saveCache("settings.json", settings{HomeList: !m.homeGrid})
+		h := "full"
+		if m.shortHints {
+			h = "short"
+		}
+		saveCache("settings.json", settings{HomeList: !m.homeGrid, Hints: h})
 	}
 }
 
 func (m *model) loadSettings() {
 	var s settings
 	m.homeGrid = cfg.homeLayout != "panels"
+	m.shortHints = cfg.hints == "short"
 	if loadCache("settings.json", &s) {
 		m.homeGrid = !s.HomeList
+		if s.Hints != "" {
+			m.shortHints = s.Hints == "short"
+		}
 	}
 	var r []string
 	if loadCache("recent.json", &r) {

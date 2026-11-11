@@ -19,6 +19,7 @@ func helpData() []helpSec {
 			{"1 – 7", "switch tab: Home, Repos, Issues, PRs, Actions, Inbox, Explore (or click it)"},
 			{"ctrl+p  :", "command palette: type what you want to do"},
 			{"?", "this page"},
+			{"H", "short / full key hints at the bottom (short: just ctrl+p and ?, plus the keys of special modes like conflicts)"},
 			{"j / k  ↑ ↓", "move (or the mouse wheel)"},
 			{"tab  h  l", "switch between the list and the right panel"},
 			{"ctrl+d / ctrl+u", "scroll the right panel"},

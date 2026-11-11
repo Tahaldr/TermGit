@@ -5,7 +5,7 @@ review and merge pull requests, read CI logs, answer issues, clear your notifica
 all of GitHub — without leaving the terminal and without remembering commands.
 
 - Works **fully by keyboard or fully by mouse**: every action has a key *and* a clickable button.
-- The keys for whatever you're looking at are **always shown at the bottom** (`?` lists all of them).
+- The keys for whatever you're looking at are **always shown at the bottom** (`?` lists all of them; once you know them, `H` shortens the bar to `ctrl+p` and `?`).
 - Questions and inputs appear in **popups** (like Nvim's command line); anything risky asks first.
 - Does everything **lazygit** does for repos on your computer, and everything you'd normally open
   **github.com** for.
@@ -162,6 +162,7 @@ you type what you want to do.
 | `r` | refresh |
 | `ctrl+p` | command palette |
 | `?` | every key |
+| `H` | short / full key hints at the bottom (short: `ctrl+p` and `?`, plus the keys of special modes like conflicts; remembered) |
 | `q` | quit |
 
 ## Settings
@@ -176,6 +177,7 @@ look_in = ~/code ; ~/projects ; ~/src ; ~/repos ; ~/Documents/GitHub   # where y
 editor = nvim             # e.g.  code -w  ·  vim  ·  hx  ·  notepad
 git_tool = lazygit        # what L opens
 notify_every = 60         # seconds between notification checks
+hints = full              # full, or short: ctrl+p and ? only (H switches)
 ```
 
 The file is `%APPDATA%\termgit\config.txt` on Windows, `~/.config/termgit/config.txt` on Linux and

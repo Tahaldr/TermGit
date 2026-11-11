@@ -135,18 +135,19 @@ type model struct {
 	expCode    map[string]*codeSearch
 
 	// home + inbox (batch 10)
-	home     homeState
-	inbox    inboxState
-	notifs   map[bool]*notifList // false = unread, true = all
-	unread   int
-	subjects map[string]*subject
-	contrib  *contribData
-	events   *eventList
-	liveN    int
-	backTo   int      // the tab to return to when leaving a repo opened from Home / Inbox (-1 = none)
-	homeGrid bool     // Home as a dashboard (t switches to two panels)
-	hintN    int      // lines the key hints take this frame
-	recent   []string // repos opened last
+	home       homeState
+	inbox      inboxState
+	notifs     map[bool]*notifList // false = unread, true = all
+	unread     int
+	subjects   map[string]*subject
+	contrib    *contribData
+	events     *eventList
+	liveN      int
+	backTo     int      // the tab to return to when leaving a repo opened from Home / Inbox (-1 = none)
+	homeGrid   bool     // Home as a dashboard (t switches to two panels)
+	shortHints bool     // H: the bottom bar keeps only the keys that are hard to guess
+	hintN      int      // lines the key hints take this frame
+	recent     []string // repos opened last
 
 	// local git 2 (batch 8)
 	lbranches map[string]*lbranchList
@@ -985,6 +986,8 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 	case "?":
 		m.openHelp()
 		return nil
+	case "H":
+		return m.toggleHints()
 	case "1", "2", "3", "4", "5", "6", "7":
 		i, _ := strconv.Atoi(s)
 		return m.setTab(i - 1)
@@ -1809,6 +1812,7 @@ func (m *model) commands() []command {
 			return m.refresh()
 		}},
 		command{"All keys", "?", func(m *model) tea.Cmd { m.openHelp(); return nil }},
+		command{"Short / full key hints", "H", func(m *model) tea.Cmd { return m.toggleHints() }},
 		command{"Settings (opens the settings file in your editor)", "", func(m *model) tea.Cmd { return m.editConfig() }},
 		command{"Update TermGit", "", func(m *model) tea.Cmd {
 			if m.newVersion == "" {

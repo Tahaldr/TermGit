@@ -1,13 +1,50 @@
 package main
 
-import "strings"
+import (
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+)
 
 // The key hints at the bottom: every action you can do right now, for the screen and
 // the highlighted item. They wrap onto a second line instead of being cut off.
 
 type hint = [2]string
 
+// hintItems: every key for now, or with H (short hints) just ctrl+p and ?, plus the keys of
+// the few special modes where the usual keys mean something else (conflicts, line staging,
+// the rebase plan, PR comments)
 func (m *model) hintItems() []hint {
+	h := m.allHints()
+	if !m.shortHints {
+		return h
+	}
+	var out []hint
+	for _, x := range h {
+		if x[0] == "ctrl+p" || x[0] == "?" || shortKeep[x[1]] {
+			out = append(out, x)
+		}
+	}
+	if len(out) == 0 { // typing a search: its few keys stay
+		return h
+	}
+	return out
+}
+
+// shortKeep: what stays in short hints, by what the key does
+var shortKeep = map[string]bool{
+	// conflicts
+	"next conflict": true, "keep top": true, "keep bottom": true, "keep both": true, "fix in nvim": true,
+	"fix conflicts": true, "keep all top": true, "keep all bottom": true, "continue / abort": true,
+	// picking lines to stage
+	"pick a line": true, "stage / unstage the line": true, "the whole hunk": true,
+	// the rebase plan
+	"pick": true, "squash": true, "fixup": true, "reword": true, "drop": true, "move it": true, "run": true,
+	// PR comments
+	"pick a comment": true, "reply": true, "resolve": true, "react": true, "go to the code": true,
+}
+
+func (m *model) allHints() []hint {
 	var h []hint
 	ex := m.exActive()
 	switch {
@@ -306,4 +343,14 @@ func (m *model) hintLines(y0 int) []string {
 		out = append(out, trunc(" "+hints(line), m.w))
 	}
 	return out
+}
+
+// H: hide / show the common key hints (remembered between runs)
+func (m *model) toggleHints() tea.Cmd {
+	m.shortHints = !m.shortHints
+	m.saveSettings()
+	if m.shortHints {
+		return m.setStatus("Short key hints: ctrl+p commands and ? every key (H shows them all again)", false)
+	}
+	return m.setStatus("All key hints shown (H hides the common ones)", false)
 }
